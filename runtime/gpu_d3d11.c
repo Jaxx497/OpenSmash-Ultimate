@@ -4535,7 +4535,10 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
      * ponytail: per-draw heuristic, no shader change (a new vertex shader costs every player ~1 h
      * of compiling); a fade without a texture is squeezed too - check one if bars show */
     int depth_on = (regs[M_DEPTH_TEST] & 1) && dsv;
-    if (rt_wide > 1.0f && !(draw_reads_wide && !depth_on)) {
+    /* (a full-screen pass may test depth with ALWAYS to write it: the half-size depth copy the
+     * smoke and other effects are tested against) */
+    int depth_tests = depth_on && dd.DepthFunc != D3D11_COMPARISON_ALWAYS;
+    if (rt_wide > 1.0f && !(draw_reads_wide && !depth_tests)) {
         params.fix[0] /= rt_wide;
         /* A 2D draw (no depth test: the HUD, menus) stays inside the middle 16:9: the game parks
          * hidden panels just off its screen, which the squeeze would bring into view. Its scissor
