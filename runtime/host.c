@@ -466,6 +466,21 @@ static void hunt_scan(Cpu *c, const u64 args[8], void *ctx) {
         ncull_prev = ncull_now;
         ncull_now = 0;
         printf("[cull] %d frustums of 16:9 (%.1f s)\n", found, (rt_now_ns() - t0) / 1e9);
+    } else if (getenv("SSBU_RCAM_WATCH")) {   /* (the render camera's view and inverse view: who writes them) */
+        u64 m = *P(u64, 0x7105337ce8ull);
+        if (m && (m = *P(u64, m + 0x490))) {
+            u64 cam = *P(u64, m + 0xd8) ? *P(u64, m + 0xe0) : 0x7105334060ull;
+            const u64 at[2] = {cam + 0x1d0, cam + 0x250};
+            for (int k = 0; k < 2; k++) {
+                u8 *page = (u8 *)((uintptr_t)G2H(at[k]) & ~(uintptr_t)4095);
+                int dup = 0;
+                for (int i = 0; i < nhunt; i++) dup |= hunt[i].page == page;
+                if (dup) continue;   /* (one entry a page: a second would restore the page read-only when the watch ends) */
+                hunt[nhunt].at = at[k];
+                hunt[nhunt].page = page;
+                nhunt++;
+            }
+        }
     } else {
         LONG n = InterlockedExchange(&hunt_nwanted, 0);
         if (n > HUNT_MAX) n = HUNT_MAX;
@@ -484,24 +499,156 @@ static void hunt_scan(Cpu *c, const u64 args[8], void *ctx) {
     for (int i = 0; i < nhunt; i++) hunt[i].armed = VirtualProtect(hunt[i].page, 4096, PAGE_READONLY, &hunt[i].old) != 0;
 }
 
-/* SSBU_CAM_DUMP (research): in fights, every 5 s, the fight camera object (main+0x5337ce8 ->
- * +0x490 -> +0xe0 when +0xd8 is set; f_7103747820 reads it so) from +0x140 to +0x340, as floats. */
-static void cam_dump(Cpu *c, const u64 args[8], void *ctx) {
+/* SSBU_CAM_TRACE=<n> (research): every n fight frames, both cameras on one line, to see how the 16:9
+ * camera behaves (docs/ULTRAWIDE.md). The fight frame is SSBU_FIGHT_HASH's (hle_fight_test.c), so its
+ * lines - the fighters' positions - join on it; it counts only with SSBU_FIGHT_HASH (or
+ * SSBU_DETERMINISTIC) set. Render camera: position (its inverse view, +0x280), field of view (+0x15c),
+ * width (+0x164). Game camera manager M (main+0x52b8f00): the stage's camera range (+0xc20: left,
+ * right, top, bottom), the blast zones (+0xc30), the visible range's centre (+0xeb0) and half height
+ * (+0xf38 x +0xf68), its width / height (+0xf58). */
+long long fight_test_frame0(void);   /* (hle_fight_test.c) */
+static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
     (void)c; (void)args; (void)ctx;
-    static u64 last;
-    if (rt_now_ns() - last < 5000000000ull) return;
-    last = rt_now_ns();
-    u64 a = *P(u64, 0x7105337ce8ull);
-    if (!a) return;
-    a = *P(u64, a + 0x490);
-    if (!a) return;
+    static long long last = -1;
+    static int every = -1;
+    if (every < 0) { every = atoi(getenv("SSBU_CAM_TRACE")); if (every < 1) every = 10; }
+    long long f = fight_test_frame0();
+    if (f <= 0 || f == last || f % every) return;
+    last = f;
+    u64 a = *P(u64, 0x7105337ce8ull), m = *P(u64, 0x71052b8f00ull);
+    if (!a || !(a = *P(u64, a + 0x490)) || !m || !(m = *P(u64, m))) return;
     u64 cam = *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
-    printf("[cam] camera %#llx (manager %#llx)\n", (unsigned long long)cam, (unsigned long long)a);
-    for (u32 o = 0x140; o < 0x340; o += 0x20) {
-        const float *f = P(float, cam + o);
-        printf("[cam] +%03x: %g %g %g %g  %g %g %g %g\n", o, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
-    }
+    const float *pos = P(float, cam + 0x280), *rg = P(float, m + 0xc20), *dz = P(float, m + 0xc30), *vc = P(float, m + 0xeb0);
+    printf("[camtrace] F %lld | render pos %.2f %.2f %.2f fov %.2f width %.0f | range %.1f %.1f %.1f %.1f | dead %.1f %.1f %.1f %.1f"
+           " | visible centre %.2f %.2f half-height %.2f aspect %.4f\n",
+           f, pos[0], pos[1], pos[2], *P(float, cam + 0x15c), *P(float, cam + 0x164), rg[0], rg[1], rg[2], rg[3], dz[0], dz[1], dz[2], dz[3],
+           vc[0], vc[1], *P(float, m + 0xf38) * *P(float, m + 0xf68), *P(float, m + 0xf58));
+    if (getenv("SSBU_CAM_TRACE_OBJ"))   /* (the render camera's start: its inputs) */
+        for (u32 o = 0; o < 0x140; o += 0x20) {
+            const float *v = P(float, cam + o);
+            printf("[camobj] F %lld +%03x: %g %g %g %g  %g %g %g %g\n", f, o, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+        }
     fflush(stdout);
+}
+
+/* SSBU_FRAMING_DUMP=<n> (research, reads only): every n fight frames, the game camera that frames the
+ * fight as f_71004fe4f0 gets it (x0), +0x40..+0x240, and the object at its +0x8 (where it takes its
+ * aspect from, +0x128), +0x60..+0x140: where it keeps the fighters' box it frames. */
+static GuestFn *fdump_orig;
+static volatile float wide_goal_offset[3];   /* (SSBU_WIDE_FRAMING: the wide goal's position minus the game's) */
+static void framing_dump(Cpu *c) {
+    static long long last = -1;
+    static int every = -1;
+    if (every < 0) { const char *e = getenv("SSBU_FRAMING_DUMP"); every = e ? atoi(e) : 0; if (e && every < 1) every = 30; }
+    long long f = fight_test_frame0();
+    if (every > 0 && f > 0 && f != last && f % every == 0) {
+        last = f;
+        u64 cam = c->x[0], src = *P(u64, cam + 0x8);
+        printf("[framing] F %lld camera %#llx (source %#llx), s0 %g\n", f, (unsigned long long)cam, (unsigned long long)src, c->v[0].f[0]);
+        for (u32 o = 0x40; o < 0x240; o += 0x20) {
+            const float *v = P(float, cam + o);
+            printf("[framing] cam+%03x: %g %g %g %g  %g %g %g %g\n", o, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+        }
+        if (src)
+            for (u32 o = 0x60; o < 0x140; o += 0x20) {
+                const float *v = P(float, src + o);
+                printf("[framing] src+%03x: %g %g %g %g  %g %g %g %g\n", o, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+            }
+        fflush(stdout);
+    }
+    static int shadow = -1;
+    if (shadow < 0) shadow = getenv("SSBU_FRAMING_SHADOW") || getenv("SSBU_WIDE_FRAMING");
+    if (!shadow) { fdump_orig(c); return; }
+    /* SSBU_FRAMING_SHADOW (research): the same framing again for the picture's shape, on copies of its
+     * two outputs (x1: the fighters' box +0x00..+0x1c and the distance +0x24; x2: the goal's look-at
+     * +0x10 and position +0x30) carved below the guest's stack, so the game's own call and state are
+     * untouched. Both logged every 30 fight frames. The fight hash says whether it changed anything. */
+    Cpu args = *c;
+    fdump_orig(c);
+    float aspect = args.v[0].f[0];
+    if (fabsf(aspect - 16.0f / 9) > 1e-3f) return;
+    Cpu s = args;
+    u64 base = (args.sp - 0x400) & ~0xFull;
+    u64 box = base, goal = base + 0x100;
+    memcpy(G2H(box), G2H(args.x[1]), 0x40);
+    memcpy(G2H(goal), G2H(args.x[2]), 0x60);
+    s.x[1] = box;
+    s.x[2] = goal;
+    s.v[0].f[0] = display_aspect();
+    s.sp = base - 0x10;
+    s.x[30] = 0;
+    fdump_orig(&s);
+    {   /* (SSBU_WIDE_FRAMING: how far the wide goal's position is from the game's) */
+        const float *gp = P(float, args.x[2] + 0x30), *wp = P(float, goal + 0x30);
+        float d[3] = {wp[0] - gp[0], wp[1] - gp[1], wp[2] - gp[2]};
+        if (d[0] == d[0] && d[1] == d[1] && d[2] == d[2] && fabsf(d[0]) < 1000 && fabsf(d[1]) < 1000 && fabsf(d[2]) < 1000)
+            memcpy((void *)wide_goal_offset, d, sizeof d);
+    }
+    long long fs = fight_test_frame0();
+    static long long shown = -1;
+    if (fs > 0 && fs != shown && fs % 30 == 0) {
+        shown = fs;
+        const float *rb = P(float, args.x[1]), *sb = P(float, box), *rg = P(float, args.x[2]), *sg = P(float, goal);
+        printf("[shadow] F %lld goal+%#llx | game box %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f dist %.1f look %.1f %.1f %.1f pos %.1f %.1f %.1f"
+               " | wide box %.1f %.1f %.1f %.1f %.1f %.1f %.1f %.1f dist %.1f look %.1f %.1f %.1f pos %.1f %.1f %.1f\n",
+               fs, (unsigned long long)(args.x[2] - args.x[0]), rb[0], rb[1], rb[2], rb[3], rb[4], rb[5], rb[6], rb[7], rb[9],
+               rg[4], rg[5], rg[6], rg[12], rg[13], rg[14], sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], sb[9],
+               sg[4], sg[5], sg[6], sg[12], sg[13], sg[14]);
+        fflush(stdout);
+    }
+}
+/* SSBU_WIDE_FRAMING (with SSBU_ASPECT_NATIVE): the game's framing, run a second time for the picture's
+ * shape (above, on copies of its outputs), gives where a wide camera would stand. The render camera's
+ * matrices are copied for drawing, culling and the HUD by f_7103555140 (dst x0 = the camera + 0x1d0,
+ * src x1 = its own); after that copy, that block is moved by the wide offset, eased like a camera:
+ * position (inverse view, +0xb0 of the block), look-at (+0x100) and the view's translation (+0x30,
+ * minus the offset turned by the view). The game's camera is not touched: the fight is the same. */
+static GuestFn *copy_orig;
+static float wide_now[3];
+static u64 render_camera(void);   /* (below) */
+/* In a fight: the fighters' frame line ran in the last quarter second (a frame hook of its own). */
+static volatile u64 fight_line_at;
+static void fight_line(Cpu *c, const u64 args[8], void *ctx) { (void)c; (void)args; (void)ctx; fight_line_at = rt_now_ns(); }
+static int in_fight(void) { return fight_line_at && rt_now_ns() - fight_line_at < 250000000ull; }
+/* The offset is on the block only while the frame is prepared for drawing (from this copy until the
+ * scene set-up, f_7103747820, returns): game logic may ask where things are on screen (scripts have
+ * sv_camera_manager::world_to_screen), and a moved camera changed a fighter's end-of-game pose. */
+static struct { u64 block; float t[3], eye[3], at[3]; int on; } wide_applied;
+static void wide_apply(u64 block, const float d[3]) {
+    float *v = P(float, block), *eye = P(float, block + 0xb0), *at = P(float, block + 0x100);
+    wide_applied.block = block;
+    memcpy(wide_applied.t, v + 12, 12); memcpy(wide_applied.eye, eye, 12); memcpy(wide_applied.at, at, 12);
+    for (int j = 0; j < 3; j++) {
+        v[12 + j] -= d[0] * v[j] + d[1] * v[4 + j] + d[2] * v[8 + j];   /* (row-vector view: t' = t - d R) */
+        eye[j] += d[j];
+        at[j] += d[j];
+    }
+    wide_applied.on = 1;
+}
+static void wide_restore(void) {
+    if (!wide_applied.on) return;
+    u64 b = wide_applied.block;
+    memcpy(P(float, b) + 12, wide_applied.t, 12); memcpy(P(float, b + 0xb0), wide_applied.eye, 12); memcpy(P(float, b + 0x100), wide_applied.at, 12);
+    wide_applied.on = 0;
+}
+static void wide_copy(Cpu *c) {
+    u64 dst = c->x[0];
+    copy_orig(c);
+    u64 cam = render_camera();
+    if (!cam || dst != cam + 0x1d0 || !in_fight()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; return; }
+    static float ease = -1;
+    if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
+    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * ease;
+    wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
+    wide_apply(dst, wide_now);
+}
+static GuestFn *prep_orig;
+static void wide_prep(Cpu *c) { prep_orig(c); wide_restore(); }
+
+static void hook_framing_dump(void) {
+    u64 orig = rt_hook_function(0x71004fe4f0ull, rt_native(framing_dump, "framing dump"));
+    if (orig) fdump_orig = rt_lookup(orig);
+    printf("[framing] dump %s (main+0x4fe4f0)\n", orig ? "on" : "NOT hooked");
 }
 
 /* SSBU_ASPECT_NATIVE (experiment): the fight camera told the picture's shape, so the game builds a
@@ -556,12 +703,19 @@ static u64 render_camera(void) {
 }
 static void hud_call(int k, Cpu *c) {
     u64 cam = render_camera();
+    int wide_here = 0;   /* (SSBU_WIDE_FRAMING: the HUD places things where the picture shows them) */
+    if (cam && copy_orig && !wide_applied.on && in_fight() && (wide_now[0] != 0 || wide_now[1] != 0 || wide_now[2] != 0)) {
+        float d[3] = {wide_now[0], wide_now[1], wide_now[2]};
+        wide_apply(cam + 0x1d0, d);
+        wide_here = 1;
+    }
     float *p = cam ? P(float, cam + 0x290) : NULL, *inv = cam ? P(float, cam + 0x2d0) : NULL;
     float wide = display_aspect() / (16.0f / 9);
     int swap = p && *P(float, cam + 0x168) == 1080.0f && InterlockedIncrement(&hud_depth) == 1;   /* (outermost only) */
     float p0 = 0, i0 = 0;
     if (swap) { p0 = p[0]; i0 = inv[0]; p[0] = p0 * wide; inv[0] = i0 / wide; }
     hud_orig[k](c);
+    if (wide_here) wide_restore();
     if (swap) { p[0] = p0; inv[0] = i0; }
     if (p && *P(float, cam + 0x168) == 1080.0f) InterlockedDecrement(&hud_depth);
 }
@@ -1637,6 +1791,15 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
+    if (getenv("SSBU_FRAMING_DUMP") || (aspect_native() && getenv("SSBU_WIDE_FRAMING"))) hook_framing_dump();
+    if (aspect_native() && getenv("SSBU_WIDE_FRAMING")) {
+        u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));
+        if (orig) copy_orig = rt_lookup(orig);
+        frame_hook_add(FRAME_HOOK_LINE, 300, fight_line, NULL, NULL);
+        u64 prep = rt_hook_function(0x7103747820ull, rt_native(wide_prep, "ultrawide framing put back"));
+        if (prep) prep_orig = rt_lookup(prep);
+        printf("[aspect] wide framing for the picture: %s (main+0x3555140)\n", orig ? "on" : "NOT hooked");
+    }
 #endif
     phase = "SDK initialisation (nn::init::Start)";
     printf("[boot] nn::init::Start\n");
@@ -1982,8 +2145,8 @@ int main(int argc, char **argv) {
         frame_hook_add(FRAME_HOOK_END, 300, NULL, wide_camera, NULL);
         printf("[aspect] native: the fight camera and its framing told %.4g\n", display_aspect());
     }
-    if (getenv("SSBU_CAM_DUMP")) frame_hook_add(FRAME_HOOK_LINE, 300, NULL, cam_dump, NULL);
-    if (getenv("SSBU_CAMERA_HUNT") || getenv("SSBU_CULL_HUNT")) { AddVectoredExceptionHandler(1, hunt_fault); frame_hook_add(getenv("SSBU_CULL_HUNT") ? FRAME_HOOK_LINE : FRAME_HOOK_END, 300, NULL, hunt_scan, NULL); }   /* (the frustum search in fights only) */
+    if (getenv("SSBU_CAM_TRACE")) frame_hook_add(FRAME_HOOK_END, 300, NULL, cam_trace, NULL);
+    if (getenv("SSBU_CAMERA_HUNT") || getenv("SSBU_CULL_HUNT") || getenv("SSBU_RCAM_WATCH")) { AddVectoredExceptionHandler(1, hunt_fault); frame_hook_add(getenv("SSBU_CULL_HUNT") ? FRAME_HOOK_LINE : FRAME_HOOK_END, 300, NULL, hunt_scan, NULL); }   /* (the frustum search in fights only) */
     dump_helper_start();
 #else
     install_signals();
