@@ -63,7 +63,6 @@ static struct {
 } cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID};
 
 static int cfg_runahead;   /* display.ini's runahead (display_runahead) */
-static char saved_aspect[16];   /* (the settings menu's picture shape: shown now, taken at the next start) */
 
 static const char DEFAULT_INI[] =
     "; display.ini: the game's window and the pacing of its frames. Read when the game starts; the\n"
@@ -321,29 +320,80 @@ const char *display_gpu(void) { load(); return cfg.gpu; }
 float display_render_scale(void) { load(); return cfg.render_scale; }
 int display_renderer(void) { load(); return cfg.renderer; }
 /* The picture shape (display.ini aspect, SSBU_ASPECT over it): "W:H", a number, or auto (the primary
- * monitor's shape); 16:9 for anything not wider, or past 4:1. Fixed at the first call (the start). */
-float display_aspect(void) {
-    static float aspect;
-    if (aspect == 0) {
+ * monitor's shape); 16:9 for anything not wider, at most 32:9 (the widest supported). Always 16:9 in a
+ * session started for online play (--online, SSBU_RB_NET: until the views are checked online) and with
+ * any renderer but Direct3D 11 (the others are not ported yet): display_shape_locked. */
+int settings_online(void);   /* (hle_settings.c) */
+int game_fight_on(void);     /* (hle_fight_test.c) */
+int display_shape_locked(void) {
+    static int locked = -1;
+    if (locked < 0) {
+        const char *rb = getenv("SSBU_RB_NET");
         load();
-        float a = 0, w, h;
-        const char *e = cfg.aspect;
-        if (!_stricmp(e, "auto")) {
+        int online = settings_online() || (rb && *rb && _stricmp(rb, "off"));
 #ifdef _WIN32
-            int mw = GetSystemMetrics(SM_CXSCREEN), mh = GetSystemMetrics(SM_CYSCREEN);   /* ponytail: the primary monitor's; the window's own if that matters */
-            if (mw > 0 && mh > 0) a = (float)mw / (float)mh;
+        int other = cfg.renderer == RENDERER_VULKAN;
+#else
+        int other = 1;
 #endif
-        } else if (sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
-        else a = (float)atof(e);
-        aspect = a > 16.0f / 9 + 1e-3f && a <= 4.0f ? a : 16.0f / 9;
-        if (aspect != 16.0f / 9) fprintf(stderr, "[display] picture shape %.4g (aspect = %s), view %s\n", aspect, cfg.aspect,
-                                         cfg.view == VIEW_WIDE ? "wide" : cfg.view == VIEW_ZOOMED ? "zoomed" : "hybrid");
+        locked = online || other;
+        if (locked && _stricmp(cfg.aspect, "16:9"))
+            fprintf(stderr, "[display] picture shape 16:9 (aspect = %s set): %s\n", cfg.aspect, online ? "online play" : "only Direct3D 11 draws wider pictures yet");
     }
-    return aspect;
+    return locked;
+}
+static float shape_of(const char *e) {
+    float a = 0, w, h;
+    if (!_stricmp(e, "auto")) {
+#ifdef _WIN32
+        int mw = GetSystemMetrics(SM_CXSCREEN), mh = GetSystemMetrics(SM_CYSCREEN);   /* ponytail: the primary monitor's; the window's own if that matters */
+        if (mw > 0 && mh > 0) a = (float)mw / (float)mh;
+#endif
+    } else if (sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
+    else a = (float)atof(e);
+    if (a > 32.0f / 9) a = 32.0f / 9;
+    return a > 16.0f / 9 + 1e-3f ? a : 16.0f / 9;
+}
+/* The shape drawn now, and the one asked for (the settings menu): the renderer takes it between two
+ * frames when no fight is running (display_aspect_take), so a fight never sees the change. */
+static volatile float shape_now, shape_want;
+float display_aspect(void) {
+    if (shape_now == 0) {
+        load();
+        shape_want = display_shape_locked() ? 16.0f / 9 : shape_of(cfg.aspect);
+        shape_now = shape_want;
+        if (shape_now != 16.0f / 9) fprintf(stderr, "[display] picture shape %.4g (aspect = %s), view %s\n", shape_now, cfg.aspect,
+                                            cfg.view == VIEW_WIDE ? "wide" : cfg.view == VIEW_ZOOMED ? "zoomed" : "hybrid");
+    }
+    return shape_now;
+}
+int display_aspect_take(void) {
+    display_aspect();
+    /* SSBU_ASPECT_CYCLE=<s> (test): 16:9, 21:9 and 32:9 asked for in turn, every s seconds; with
+     * SSBU_ASPECT_ANYTIME=1 (test) taken in fights too */
+    static double cycle = -1;
+    static int anytime;
+    if (cycle < 0) {
+        const char *e = getenv("SSBU_ASPECT_CYCLE");
+        cycle = e ? atof(e) : 0;
+        anytime = getenv("SSBU_ASPECT_ANYTIME") != NULL;
+    }
+    if (cycle > 0 && !display_shape_locked()) {
+        static const float SHAPES[] = {16.0f / 9, 21.0f / 9, 32.0f / 9};
+        shape_want = SHAPES[(unsigned long long)((double)rt_now_ns() / (cycle * 1e9)) % 3];
+    }
+    if (shape_want == shape_now || (game_fight_on() && !anytime)) return 0;
+    fprintf(stderr, "[display] picture shape now %.4g (was %.4g)%s\n", shape_want, shape_now, game_fight_on() ? ", in a fight (SSBU_ASPECT_ANYTIME)" : "");
+    shape_now = shape_want;
+    return 1;
 }
 int display_view(void) { load(); return cfg.view; }
-const char *display_aspect_setting(void) { load(); return saved_aspect[0] ? saved_aspect : cfg.aspect; }
-void display_set_aspect(const char *text) { snprintf(saved_aspect, sizeof saved_aspect, "%s", text); }
+const char *display_aspect_setting(void) { load(); return cfg.aspect; }
+void display_set_aspect(const char *text) {
+    display_aspect();
+    snprintf(cfg.aspect, sizeof cfg.aspect, "%s", text);
+    if (!display_shape_locked()) shape_want = shape_of(text);   /* (taken at the next frame with no fight running) */
+}
 void display_set_view(int view) { load(); cfg.view = view; }   /* (at once: the views read it every frame) */
 
 /* (the settings menu) the render scale it saved: shown from now on, the renderer's own counts

@@ -5492,6 +5492,11 @@ void d3d11_present(u64 guest, u32 width, u32 height) {
     forget_draw_state();
     gfx_stat_presented++;
     release_graves();
+    if (display_aspect_take()) {   /* a new picture shape, between fights: the 16:9-shaped targets made again at its width */
+        ID3D11DeviceContext_OMSetRenderTargets(ctx, 0, NULL, NULL);
+        for (u32 i = 0; i < nsurfaces; i++)
+            if (surfaces[i].tex && (u64)surfaces[i].width * 9 == (u64)surfaces[i].height * 16) release_surface(&surfaces[i]);
+    }
     note_writes();
     debug_messages();
     static int logged, frames_logged, frames_to_log;

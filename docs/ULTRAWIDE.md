@@ -15,12 +15,13 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
 
 | Setting | What it does |
 | :--- | :--- |
-| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"), from the next start. |
+| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame with no fight running (picked in a fight, it waits for its end). Always 16:9 in a session started for online play (`--online`, `SSBU_RB_NET`) and with a renderer other than Direct3D 11. |
 | `display.ini` `view = wide \| zoomed \| hybrid` (`SSBU_VIEW` over it) | The view, with a picture wider than 16:9. Default hybrid. Also in the settings menu ("View"), at once, mid-fight too. |
 | `SSBU_GAME_FRAMING_WIDE=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
 | `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP` | Old tests. To remove. |
 | `SSBU_CAMERA_HUNT`, `SSBU_CULL_HUNT`, `SSBU_RCAM_WATCH`, `SSBU_CAM_TRACE`, `SSBU_FRAMING_DUMP`, `SSBU_SHADOW_LOG`, F9 | Research and measurement. The traces stay while views are tuned; the hunts go. |
 | `SSBU_GFX_LOG_CB=all` | F4's draw log dumps every constant buffer bank in full. |
+| `SSBU_ASPECT_CYCLE=<s>`, `SSBU_ASPECT_ANYTIME=1` | Test: 16:9, 21:9, 32:9 asked for in turn every s seconds; with ANYTIME taken mid-fight too (a stress test: in play the shape never changes in a fight). |
 | `SSBU_VIEW_CYCLE=<n>` | Test: the next view every n fight frames, as the menu would (switching mid-fight, checked by replay hash). |
 
 ## What the runtime changes (by file)
@@ -289,23 +290,24 @@ few seconds into a fight (16:9 too).
 6. **HUD layout**: the damage meters stay with the 16:9 view (owner, 2026-11-11); minimap later.
 6a. ~~**The view changes live**~~ done (2026-11-11): every view's hooks are in whenever the picture is
    wider than 16:9 and each reads the view every frame; the menu's View takes effect at once
-   (`SSBU_VIEW_CYCLE=200` on the Bridge of Eldin replay: the same as 16:9). The picture shape still
-   waits for a restart (see Open).
-7. **Vulkan and Metal**: the same changes in the other renderers (Direct3D 11 only now).
+   (`SSBU_VIEW_CYCLE=200` on the Bridge of Eldin replay: the same as 16:9).
+6c. ~~**The picture shape changes without a restart**~~ done (2026-11-11): the shape asked for (menu)
+   is taken by the renderer at a present with no fight running (`game_fight_on`, the ready-go flag);
+   then every 16:9-shaped render target is released and made again at the new width on its next use
+   (they are looked up by the game's address each time). Everything else reads the shape live: the
+   camera's +0x164/+0x16c (written back to 1920 / 16:9 once when 16:9 returns, untouched before), the
+   HUD wrappers (straight through at 16:9), the views (no offset at 16:9). The hooks are in whenever the
+   session may draw wider (not online, Direct3D 11). Known: the render scale's "auto" is fixed at the
+   start, from the shape then; the window keeps its size (the picture fits inside it, with bars).
+7. **Vulkan and Metal**: the same changes in the other renderers (Direct3D 11 only now; the others
+   are held at 16:9). The camera and HUD work in `host.c` is shared but Windows-only (`#ifdef _WIN32`,
+   `Interlocked*`): Metal needs it made portable. Online: held at 16:9 for now (owner, 2026-11-11).
 8. **Clean-up before shipping**: remove the research switches and hooks (hunts, dumps, F9 picker,
    `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP`); keep `SSBU_GAME_FRAMING_WIDE` as the
    reference while it is useful; online stays 16:9 until a fight-hash test of each camera style passes.
 
 ## Open
 
-- **Picture shape live** (owner wants it reliable, not instant): the renderer makes each host render
-  target on first use, keyed by the game's address, and can already drop one (`release_surface`,
-  views buried while bound). A shape change would, at a frame boundary, drop every widened (16:9-shaped)
-  target so the next use makes it at the new width; make `aspect_native()`/`display_aspect()` live and
-  have the hooks in from the start (passing through at 16:9), the camera's +0x164 written back to 1920
-  at 16:9; refit the window. Cost: a frame or so of wrong picture at the switch (targets the game keeps
-  across frames: effects' history, the paused-screen background), checked by a shape-cycling replay
-  hash. Same mechanism would make render scale live.
 
 - Camera feel: with the 16:9 framing the wide picture shows past the stage's range. The widened
   framing looked right but changes the fight. To look at next: how the 16:9 camera behaves (dump the

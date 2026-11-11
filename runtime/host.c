@@ -580,9 +580,9 @@ static void framing_dump(Cpu *c) {
         if (fabsf(*own - 16.0f / 9) < 1e-3f) *own = a;
         if (fabsf(c->v[0].f[0] - 16.0f / 9) < 1e-3f) c->v[0].f[0] = a;
     }
-    static int shadow = -1;
-    if (shadow < 0) shadow = getenv("SSBU_FRAMING_SHADOW") || view_on();
-    if (!shadow) { fdump_orig(c); return; }
+    static int shadow_env = -1;
+    if (shadow_env < 0) shadow_env = getenv("SSBU_FRAMING_SHADOW") != NULL;
+    if (!shadow_env && !view_on()) { fdump_orig(c); return; }
     /* SSBU_FRAMING_SHADOW (research): the same framing again for the picture's shape, on copies of its
      * two outputs (x1: the fighters' box +0x00..+0x1c and the distance +0x24; x2: the goal's look-at
      * +0x10 and position +0x30) carved below the guest's stack, so the game's own call and state are
@@ -714,7 +714,7 @@ static void wide_copy(Cpu *c) {
     u64 dst = c->x[0];
     copy_orig(c);
     u64 cam = render_camera();
-    if (!cam || dst != cam + 0x1d0 || !in_fight()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; return; }
+    if (!cam || dst != cam + 0x1d0 || !in_fight() || !view_on()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; shadow_k = 1; return; }
     static float ease = -1;
     if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
     static int cycle = -1;   /* SSBU_VIEW_CYCLE=<n> (test): the next view every n fight frames, as the menu would */
@@ -768,7 +768,7 @@ static void replay_call(const CallRec *r, Cpu *base_c, u64 base, u64 blk, u64 x3
 static u64 shadow_cam;
 static int shadow_ready;
 static void shadow_update(Cpu *c) {
-    if (!wide_style_shadow()) { shadow_ready = 0; upd_orig(c); return; }   /* (another view now: the next zoomed one starts afresh) */
+    if (!view_on() || !wide_style_shadow()) { shadow_ready = 0; upd_orig(c); return; }   /* (another view now: the next zoomed one starts afresh) */
     u64 cam = c->x[0];
     rec_cam = cam;
     rec_frame.valid = rec_move.valid = 0;
@@ -824,7 +824,7 @@ static void framing_hook(Cpu *c) {
     static int dump = -1;
     if (dump < 0) dump = getenv("SSBU_FRAMING_DUMP") != NULL;
     if (rec_cam) rec_call(&rec_frame, c, frame_fn_orig);
-    else if (dump || display_view() == VIEW_WIDE) framing_dump(c);
+    else if (dump || (view_on() && display_view() == VIEW_WIDE)) framing_dump(c);
     else frame_fn_orig(c);
 }
 
@@ -845,15 +845,12 @@ int aspect_native(void);
 /* A view (wide, zoomed, hybrid) frames the picture: whenever it is wider than 16:9, except with
  * SSBU_GAME_FRAMING_WIDE, the reference view, which tells the game itself the picture's shape. */
 static int view_on(void) {
-    static int on = -1;
-    if (on < 0) on = aspect_native() && !getenv("SSBU_GAME_FRAMING_WIDE");
-    return on;
+    static int ref = -1;
+    if (ref < 0) ref = getenv("SSBU_GAME_FRAMING_WIDE") != NULL;
+    return aspect_native() && !ref;
 }
-int aspect_native(void) {
-    static int on = -1;
-    if (on < 0) on = display_aspect() != 16.0f / 9;   /* (the game draws the 3D wide whenever the picture is wider) */
-    return on;
-}
+/* (the shape as drawn now: it changes between fights, display_aspect_take) */
+int aspect_native(void) { return display_aspect() != 16.0f / 9; }   /* (the game draws the 3D wide whenever the picture is wider) */
 /* SSBU_ASPECT_HYBRID (test): the renderer squeezes as without NATIVE, the render camera keeps its 16:9
  * projection (+0x16c), only its width (+0x164) is the picture's; the game camera framing is widened. */
 static int aspect_hybrid(void) {
@@ -868,9 +865,12 @@ static void wide_camera(Cpu *c, const u64 args[8], void *ctx) {
     u64 cam = *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
     float *f = P(float, cam + 0x164);
     if (f[1] != 1080.0f) return;   /* (not the camera this was measured on) */
-    float w = 1080.0f * display_aspect();
+    static float written;   /* (the shape last written: at 16:9 nothing, once 16:9's own values are back) */
+    float shape = display_aspect(), w = 1080.0f * shape;
+    if (shape == 16.0f / 9 && written == 0) return;
     f[0] = w;                                        /* +0x164 */
-    if (aspect_native()) f[2] = display_aspect();    /* +0x16c */
+    if (!aspect_hybrid()) f[2] = shape;              /* +0x16c */
+    written = shape == 16.0f / 9 ? 0 : shape;
     if (getenv("SSBU_ASPECT_SCREEN")) {   /* (test: the second 1920 x 1080, +0x170, and its reciprocal +0x178: the screen in pixels?) */
         f[3] = w;
         f[5] = 1.0f / w;
@@ -898,6 +898,7 @@ static u64 render_camera(void) {
 volatile long hud_calls[12];   /* (SSBU_CAM_TRACE: calls of each HUD world-to-screen function) */
 static void hud_call(int k, Cpu *c) {
     InterlockedIncrement(&hud_calls[k]);
+    if (!aspect_native()) { hud_orig[k](c); return; }   /* (16:9: the game's own, untouched) */
     u64 cam = render_camera();
     int wide_here = 0;   /* (SSBU_WIDE_FRAMING: the HUD places things where the picture shows them) */
     if (cam && copy_orig && !wide_applied.on && in_fight() && (wide_now[0] != 0 || wide_now[1] != 0 || wide_now[2] != 0 || shadow_k != 1)) {
@@ -2003,9 +2004,10 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #ifdef _WIN32
 #endif
 #ifdef _WIN32
-    if (aspect_native()) hook_hud_projection();
-    if (!view_on() && (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE"))) hook_framing_dump();
-    if (view_on()) {   /* (every view's hooks: the view can change during a fight) */
+    if (!display_shape_locked()) hook_hud_projection();   /* (the shape can change between fights: in from the start, passing through at 16:9) */
+    int views = !display_shape_locked() && !getenv("SSBU_GAME_FRAMING_WIDE");   /* (every view's hooks: view and shape can change) */
+    if (!views && (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE"))) hook_framing_dump();
+    if (views) {
         u64 orig = rt_hook_function(0x71004fdc10ull, rt_native(shadow_update, "ultrawide shadow camera"));
         if (orig) upd_orig = rt_lookup(orig);
         u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(framing_hook, "ultrawide framing"));
@@ -2015,7 +2017,7 @@ static DWORD WINAPI guest_main(LPVOID unused) {
         if (!f1 || !f2) orig = 0;
         printf("[aspect] the views' game camera hooks: %s (main+0x4fdc10)\n", orig ? "on" : "NOT hooked");
     }
-    if (view_on()) {
+    if (views) {
         u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));
         if (orig) copy_orig = rt_lookup(orig);
         frame_hook_add(FRAME_HOOK_LINE, 300, fight_line, NULL, NULL);
@@ -2364,7 +2366,7 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     crash_reporter_start();
     AddVectoredExceptionHandler(1, on_fault);
-    if (aspect_native() || aspect_hybrid()) {
+    if (!display_shape_locked()) {
         frame_hook_add(FRAME_HOOK_END, 300, NULL, wide_camera, NULL);
         printf("[aspect] native: the fight camera and its framing told %.4g\n", display_aspect());
     }

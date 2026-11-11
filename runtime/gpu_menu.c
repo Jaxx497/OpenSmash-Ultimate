@@ -910,9 +910,10 @@ static void build(void)
         else
             snprintf(r->value, sizeof r->value, "%g", ds.render_scale);
         note_env(r, "SSBU_RENDER_SCALE");
-        r = add(R_ASPECT, K_CHOICE, W_RESTART, "Picture shape",
-                "16:9 is the game's own. Wider (21:9, 32:9, or auto: the monitor's) shows the fight wider without stretching it; "
-                "the fight itself stays what 16:9 has, online too. The HUD stays in the middle.");
+        r = add(R_ASPECT, K_CHOICE, W_NOW, "Picture shape",
+                "16:9 is the game's own. Wider (21:9, 32:9, or auto: the monitor's, up to 32:9) shows the fight wider without stretching it; "
+                "the fight itself stays what 16:9 has. The HUD stays in the middle. Changes between fights (picked in one, it waits for its end). "
+                "Online play: 16:9.");
         snprintf(r->value, sizeof r->value, "%s", display_aspect_setting());
         note_env(r, "SSBU_ASPECT");
         r = add(R_VIEW, K_CHOICE, W_NOW, "View (wider pictures)",
@@ -1380,7 +1381,7 @@ static void change(const Row *row, int dir)
                 i = k;
         i = i < 0 ? (dir > 0 ? 0 : n - 1) : cycle(i, n, dir);
         set_display("aspect", SHAPES[i]);
-        display_set_aspect(SHAPES[i]);   /* (shown now; taken at the next start) */
+        display_set_aspect(SHAPES[i]);   /* (taken at the next frame with no fight running) */
         break;
     }
     case R_VIEW:
