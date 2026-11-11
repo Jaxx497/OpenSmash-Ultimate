@@ -58,9 +58,13 @@ static struct {
     float render_scale;   /* 0: auto */
     double speed;         /* SSBU_SPEED (test runs): 1 normal */
     int renderer;         /* RENDERER_* (renderer.h) */
-} cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT};
+    char aspect[16];      /* the picture shape: "16:9", "auto" or "W:H" (docs/ULTRAWIDE-CONTEXT.md) */
+    int view;             /* VIEW_* (display.h) */
+} cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID};
 
 static int cfg_runahead;   /* display.ini's runahead (display_runahead) */
+static char saved_aspect[16];   /* (the settings menu's choices: shown now, taken at the next start) */
+static int saved_view = -1;
 
 static const char DEFAULT_INI[] =
     "; display.ini: the game's window and the pacing of its frames. Read when the game starts; the\n"
@@ -145,6 +149,16 @@ static const char DEFAULT_INI[] =
     ";   monitor with window = borderless), at least 1. A bigger picture than the window is shrunk to fit.\n"
 #endif
     "render_scale = 1\n"
+    "\n"
+    "; aspect = 16:9 | auto | width:height (e.g. 21:9, 43:18 for 3440x1440, 32:9)\n"
+    ";   The picture's shape. 16:9: the game's own. Wider: the fight is seen wider, nothing stretched,\n"
+    ";   and the fight stays exactly what 16:9 has (online too). auto: the monitor's shape.\n"
+    "aspect = 16:9\n"
+    "; view = wide | zoomed | hybrid (with a picture wider than 16:9)\n"
+    ";   wide:   the 16:9 view with the sides added at the same zoom (it can show past the stage).\n"
+    ";   zoomed: the game frames the fight for the wider picture: closer, kept on the stage.\n"
+    ";   hybrid: wide, but zoomed in just enough to keep the picture on the stage.\n"
+    "view = hybrid\n"
 #ifdef _WIN32
     "\n"
     "; gpu = auto, or part of a graphics card's name (e.g. nvidia, radeon, intel)\n"
@@ -191,6 +205,14 @@ static void parse_render_scale(const char *v) {
     if (!_stricmp(v, "auto")) cfg.render_scale = 0;
     else if (end != v && x >= 0.5 && x <= 4) cfg.render_scale = (float)x;
     else { fprintf(stderr, "[display] render_scale is auto or a number from 0.5 to 4, not '%s': 1 it is\n", v); cfg.render_scale = 1; }
+}
+
+/* view = wide | zoomed | hybrid */
+static void parse_view(const char *v, const char *where) {
+    if (!_stricmp(v, "wide")) cfg.view = VIEW_WIDE;
+    else if (!_stricmp(v, "zoomed")) cfg.view = VIEW_ZOOMED;
+    else if (!_stricmp(v, "hybrid")) cfg.view = VIEW_HYBRID;
+    else fprintf(stderr, "[display] %s: view is wide, zoomed or hybrid, not '%s': hybrid it is\n", where, v);
 }
 
 /* renderer = d3d11 | dxvk | metal (the system's own: renderer.h) | vulkan */
@@ -255,6 +277,8 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
         else if (!_stricmp(key, "gpu")) snprintf(cfg.gpu, sizeof cfg.gpu, "%s", value);
         else if (!_stricmp(key, "render_scale")) parse_render_scale(value);
         else if (!_stricmp(key, "renderer")) parse_renderer(value, path);
+        else if (!_stricmp(key, "aspect")) snprintf(cfg.aspect, sizeof cfg.aspect, "%s", value);
+        else if (!_stricmp(key, "view")) parse_view(value, path);
         else if (!_stricmp(key, "volume")) {}   /* (the master volume: ipc_audio.c's audio_master_volume reads it) */
         else fprintf(stderr, "[display] %s: unknown setting '%s'\n", path, key);
     }
@@ -266,6 +290,8 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     if ((env = getenv("SSBU_WINDOW_SIZE")) && *env) sscanf(env, "%dx%d", &cfg.width, &cfg.height);
     if ((env = getenv("SSBU_RENDER_SCALE")) && *env) parse_render_scale(env);
     if ((env = getenv("SSBU_RENDERER")) && *env) parse_renderer(env, "SSBU_RENDERER");
+    if ((env = getenv("SSBU_ASPECT")) && *env) snprintf(cfg.aspect, sizeof cfg.aspect, "%s", env);
+    if ((env = getenv("SSBU_VIEW")) && *env) parse_view(env, "SSBU_VIEW");
     if (!speed_parse(env = getenv("SSBU_SPEED"), &cfg.speed))
         fprintf(stderr, "[display] SSBU_SPEED is a number of times 60 frames a second, up to %g (0: uncapped), not '%s': normal speed\n", SPEED_MAX, env);
     if (cfg.width < 320) cfg.width = 320;
@@ -295,19 +321,32 @@ Pacing display_pacing(void) { load(); return cfg.pacing; }
 const char *display_gpu(void) { load(); return cfg.gpu; }
 float display_render_scale(void) { load(); return cfg.render_scale; }
 int display_renderer(void) { load(); return cfg.renderer; }
-/* SSBU_ASPECT (prototype): the picture's shape, "W:H" (43:18 for 3440x1440) or a number; 16:9 without.
- * ponytail: env only, no display.ini key or menu entry until the prototype proves out */
+/* The picture shape (display.ini aspect, SSBU_ASPECT over it): "W:H", a number, or auto (the primary
+ * monitor's shape); 16:9 for anything not wider, or past 4:1. Fixed at the first call (the start). */
 float display_aspect(void) {
     static float aspect;
     if (aspect == 0) {
-        const char *e = getenv("SSBU_ASPECT");
+        load();
         float a = 0, w, h;
-        if (e && sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
-        else if (e) a = (float)atof(e);
-        aspect = a >= 1.0f && a <= 4.0f ? a : 16.0f / 9;
+        const char *e = cfg.aspect;
+        if (!_stricmp(e, "auto")) {
+#ifdef _WIN32
+            int mw = GetSystemMetrics(SM_CXSCREEN), mh = GetSystemMetrics(SM_CYSCREEN);   /* ponytail: the primary monitor's; the window's own if that matters */
+            if (mw > 0 && mh > 0) a = (float)mw / (float)mh;
+#endif
+        } else if (sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
+        else a = (float)atof(e);
+        aspect = a > 16.0f / 9 + 1e-3f && a <= 4.0f ? a : 16.0f / 9;
+        if (aspect != 16.0f / 9) fprintf(stderr, "[display] picture shape %.4g (aspect = %s), view %s\n", aspect, cfg.aspect,
+                                         cfg.view == VIEW_WIDE ? "wide" : cfg.view == VIEW_ZOOMED ? "zoomed" : "hybrid");
     }
     return aspect;
 }
+int display_view(void) { load(); return cfg.view; }
+const char *display_aspect_setting(void) { load(); return saved_aspect[0] ? saved_aspect : cfg.aspect; }
+int display_view_setting(void) { load(); return saved_view >= 0 ? saved_view : cfg.view; }
+void display_set_aspect(const char *text) { snprintf(saved_aspect, sizeof saved_aspect, "%s", text); }
+void display_set_view(int view) { saved_view = view; }
 
 /* (the settings menu) the render scale it saved: shown from now on, the renderer's own counts
  * only at the next start */

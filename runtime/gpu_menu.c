@@ -134,7 +134,7 @@ static const char *const PAGE_NAMES[PAGES] = {"Display", "Controllers", "Online"
 enum { K_INFO, K_CHOICE, K_ACTION, K_TEXT };
 enum { W_NONE, W_NOW, W_RESTART };
 enum {
-    R_NONE, R_WINDOW, R_PACING, R_LATENCY, R_CURSOR, R_OVERLAY, R_SIZE, R_SCALE, R_GPU,
+    R_NONE, R_WINDOW, R_PACING, R_LATENCY, R_CURSOR, R_OVERLAY, R_SIZE, R_SCALE, R_ASPECT, R_VIEW, R_GPU,
     R_PAD, R_PAD_PLAYER, R_PAD_LAYOUT, R_PAD_DEADZONE, R_PAD_RUMBLE, R_PAD_TRIGGER, R_PAD_REMAP, R_PAD_TEST, R_PAD_RESET,
     R_PAD_STICKS, R_PAD_RECAL, R_STICKS_BACK,
     R_RUMBLE, R_KEYBOARD, R_BACKGROUND, R_PADS_FILE,
@@ -910,6 +910,19 @@ static void build(void)
         else
             snprintf(r->value, sizeof r->value, "%g", ds.render_scale);
         note_env(r, "SSBU_RENDER_SCALE");
+        r = add(R_ASPECT, K_CHOICE, W_RESTART, "Picture shape",
+                "16:9 is the game's own. Wider (21:9, 32:9, or auto: the monitor's) shows the fight wider without stretching it; "
+                "the fight itself stays what 16:9 has, online too. The HUD stays in the middle.");
+        snprintf(r->value, sizeof r->value, "%s", display_aspect_setting());
+        note_env(r, "SSBU_ASPECT");
+        r = add(R_VIEW, K_CHOICE, W_RESTART, "View (wider pictures)",
+                "wide: the 16:9 view with the sides added (it can show past the stage). zoomed: the fight framed for the wider picture, "
+                "closer and kept on the stage. hybrid: wide, zoomed in just enough to keep the picture on the stage.");
+        {
+            int v = display_view_setting();
+            snprintf(r->value, sizeof r->value, "%s", v == VIEW_WIDE ? "wide" : v == VIEW_ZOOMED ? "zoomed" : "hybrid");
+        }
+        note_env(r, "SSBU_VIEW");
 #ifdef _WIN32
         r = add(R_GPU, K_CHOICE, W_RESTART, "Graphics card", "Auto picks the fastest card (on a laptop, the NVIDIA or AMD one). Pick another to use it instead.");
         snprintf(r->value, sizeof r->value, "%s", ds.gpu);
@@ -1356,6 +1369,26 @@ static void change(const Row *row, int dir)
         i = i < 0 ? (dir > 0 ? 0 : n - 1) : cycle(i, n, dir);
         set_display("render_scale", SCALES[i]);
         display_set_render_scale(VALUES[i]); /* (shown now; the renderer takes it at the next start) */
+        break;
+    }
+    case R_ASPECT:
+    {
+        static const char *const SHAPES[] = {"16:9", "auto", "21:9", "43:18", "32:9"};
+        int n = sizeof SHAPES / sizeof *SHAPES, i = -1;
+        for (int k = 0; k < n; k++)
+            if (!_stricmp(SHAPES[k], display_aspect_setting()))
+                i = k;
+        i = i < 0 ? (dir > 0 ? 0 : n - 1) : cycle(i, n, dir);
+        set_display("aspect", SHAPES[i]);
+        display_set_aspect(SHAPES[i]);   /* (shown now; taken at the next start) */
+        break;
+    }
+    case R_VIEW:
+    {
+        static const char *const VIEWS[] = {"wide", "zoomed", "hybrid"};
+        int i = cycle(display_view_setting(), 3, dir);
+        set_display("view", VIEWS[i]);
+        display_set_view(i);
         break;
     }
     case R_RENDERER:

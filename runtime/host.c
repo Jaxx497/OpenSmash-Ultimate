@@ -541,6 +541,7 @@ static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
 /* SSBU_FRAMING_DUMP=<n> (research, reads only): every n fight frames, the game camera that frames the
  * fight as f_71004fe4f0 gets it (x0), +0x40..+0x240, and the object at its +0x8 (where it takes its
  * aspect from, +0x128), +0x60..+0x140: where it keeps the fighters' box it frames. */
+static int view_on(void);   /* (below) */
 static GuestFn *fdump_orig;
 static volatile float wide_goal_offset[3];   /* (SSBU_WIDE_FRAMING: the wide goal's position minus the game's) */
 static void framing_dump(Cpu *c) {
@@ -573,7 +574,7 @@ static void framing_dump(Cpu *c) {
         if (fabsf(c->v[0].f[0] - 16.0f / 9) < 1e-3f) c->v[0].f[0] = a;
     }
     static int shadow = -1;
-    if (shadow < 0) shadow = getenv("SSBU_FRAMING_SHADOW") || getenv("SSBU_WIDE_FRAMING");
+    if (shadow < 0) shadow = getenv("SSBU_FRAMING_SHADOW") || view_on();
     if (!shadow) { fdump_orig(c); return; }
     /* SSBU_FRAMING_SHADOW (research): the same framing again for the picture's shape, on copies of its
      * two outputs (x1: the fighters' box +0x00..+0x1c and the distance +0x24; x2: the goal's look-at
@@ -804,12 +805,12 @@ static void shadow_update(Cpu *c) {
 }
 static int wide_style_shadow(void) {   /* (research: the shadow camera above) */
     static int on = -1;
-    if (on < 0) { const char *v = getenv("SSBU_WIDE_STYLE"); on = v && !_stricmp(v, "shadow"); }
+    if (on < 0) on = display_view() == VIEW_ZOOMED;
     return on;
 }
 static int wide_style_stage(void) {
     static int on = -1;
-    if (on < 0) { const char *v = getenv("SSBU_WIDE_STYLE"); on = v && !_stricmp(v, "stage"); }
+    if (on < 0) on = display_view() == VIEW_HYBRID;
     return on;
 }
 
@@ -826,9 +827,17 @@ static void hook_framing_dump(void) {
  * wide projection itself and culls, frames and checks the screen with it. The camera object (as
  * cam_dump finds it): +0x164 width, +0x168 height, +0x16c width / height, +0x178 1 / width - the
  * game's 1920, 1080, 16:9. Written at every frame end, before the next frame's camera update. */
+int aspect_native(void);
+/* A view (wide, zoomed, hybrid) frames the picture: whenever it is wider than 16:9, except with
+ * SSBU_GAME_FRAMING_WIDE, the reference view, which tells the game itself the picture's shape. */
+static int view_on(void) {
+    static int on = -1;
+    if (on < 0) on = aspect_native() && !getenv("SSBU_GAME_FRAMING_WIDE");
+    return on;
+}
 int aspect_native(void) {
     static int on = -1;
-    if (on < 0) on = getenv("SSBU_ASPECT_NATIVE") && display_aspect() != 16.0f / 9;
+    if (on < 0) on = display_aspect() != 16.0f / 9;   /* (the game draws the 3D wide whenever the picture is wider) */
     return on;
 }
 /* SSBU_ASPECT_HYBRID (test): the renderer squeezes as without NATIVE, the render camera keeps its 16:9
@@ -1962,8 +1971,8 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
-    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING") && !wide_style_stage() && !wide_style_shadow())) hook_framing_dump();
-    if (aspect_native() && getenv("SSBU_WIDE_FRAMING") && wide_style_shadow()) {
+    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (view_on() && !wide_style_stage() && !wide_style_shadow())) hook_framing_dump();
+    if (view_on() && wide_style_shadow()) {
         u64 orig = rt_hook_function(0x71004fdc10ull, rt_native(shadow_update, "ultrawide shadow camera"));
         if (orig) upd_orig = rt_lookup(orig);
         u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(rec_frame_call, "ultrawide framing recorder"));
@@ -1973,7 +1982,7 @@ static DWORD WINAPI guest_main(LPVOID unused) {
         if (!f1 || !f2) orig = 0;
         printf("[aspect] camera style stage (shadow camera): %s (main+0x4fdc10)\n", orig ? "on" : "NOT hooked");
     }
-    if (aspect_native() && getenv("SSBU_WIDE_FRAMING")) {
+    if (view_on()) {
         u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));
         if (orig) copy_orig = rt_lookup(orig);
         frame_hook_add(FRAME_HOOK_LINE, 300, fight_line, NULL, NULL);

@@ -8,18 +8,19 @@ Goals agreed with the owner: the fight must stay exactly what 16:9 computes (onl
 stays in the middle 16:9, unstretched; the P1/CPU tags and the magnifying glasses sit on their fighters;
 the camera should feel like 16:9's (centred, pulling in, not showing much past the stage).
 
-## Switches (environment, Direct3D 11 only)
+## Settings and switches (Direct3D 11 only)
 
-| Variable | What it does | State |
-| :--- | :--- | :--- |
-| `SSBU_ASPECT=W:H` | The picture's shape (`43:18` = 3440x1440, `32:9`). Unset: 16:9, nothing changes. | kept |
-| `SSBU_ASPECT_NATIVE=1` | The game draws its 3D wide itself (render camera widened); the renderer squeezes only 2D. | kept, the current mode |
-| `SSBU_ASPECT_HYBRID=1` | Test: render camera width only, renderer squeezes everything. Squashed fights. | to remove |
-| `SSBU_ASPECT_SCREEN=1` | Test: the render camera's second width (+0x170) too. No effect seen. | to remove |
-| `SSBU_NO_2D_CLAMP=1` | The 2D clip to the middle 16:9 off. Menus and the CPU-level pop-up break, yellow bars show. | to remove |
-| `SSBU_CAMERA_HUNT`, `SSBU_CULL_HUNT`, `SSBU_CAM_DUMP` | Research: camera matrix and frustum searches, the render camera dumped every 5 s. | research, to remove |
-| F9 (key) | Research: steps through the kinds of squeezed 2D draw, leaving one unsqueezed. | research, to remove |
-| `SSBU_GFX_LOG_CB=all` | F4's draw log dumps every constant buffer bank in full. | small, may keep |
+The words used here (picture shape, wide / zoomed / hybrid view, stage range, ...) are defined in
+[ULTRAWIDE-CONTEXT.md](ULTRAWIDE-CONTEXT.md).
+
+| Setting | What it does |
+| :--- | :--- |
+| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"), from the next start. |
+| `display.ini` `view = wide \| zoomed \| hybrid` (`SSBU_VIEW` over it) | The view, with a picture wider than 16:9. Default hybrid. Also in the settings menu ("View"), from the next start. |
+| `SSBU_GAME_FRAMING_WIDE=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
+| `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP` | Old tests. To remove. |
+| `SSBU_CAMERA_HUNT`, `SSBU_CULL_HUNT`, `SSBU_RCAM_WATCH`, `SSBU_CAM_TRACE`, `SSBU_FRAMING_DUMP`, `SSBU_SHADOW_LOG`, F9 | Research and measurement. The traces stay while views are tuned; the hunts go. |
+| `SSBU_GFX_LOG_CB=all` | F4's draw log dumps every constant buffer bank in full. |
 
 ## What the runtime changes (by file)
 
@@ -256,8 +257,8 @@ with the game camera widened: first difference frame 578, damage. A stage not na
    useful cue near the blast zone).
 3. **Keep drawing the fighter in the bubble**: the game hides the fighter's model when it bubbles it;
    keep drawing it while it is inside the wide picture (visual only), bubble shown too.
-4. **Settings**: a `display.ini` key for the aspect (`auto` from the monitor, `16:9`, `21:9`, `32:9`, ...)
-   and for the camera style (`full`, `stage`), and both in the in-game settings menu.
+4. ~~**Settings**~~ done (2026-11-11): `display.ini` `aspect` and `view`, both in the settings menu;
+   all three views fight-identical on the Bridge of Eldin replay.
 5. **Menus and loading screens**: fill the sides (black, or a blur of the middle) where nothing draws.
 6. **HUD layout options**: damage meters and the minimap placed for wide screens.
 7. **Vulkan and Metal**: the same changes in the other renderers (Direct3D 11 only now).

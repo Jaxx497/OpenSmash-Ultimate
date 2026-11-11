@@ -31,6 +31,14 @@ void display_note_refresh(int hz);                /* the window's monitor refres
 int display_take_size(unsigned *w, unsigned *h);
 /* The picture's shape, width over height: 16:9 unless SSBU_ASPECT says otherwise (gpu_display.c). */
 float display_aspect(void);
+/* The view (docs/ULTRAWIDE-CONTEXT.md): display.ini view, SSBU_VIEW over it. */
+enum { VIEW_WIDE, VIEW_ZOOMED, VIEW_HYBRID };
+int display_view(void);
+/* (the settings menu) the settings as saved, and changes it saves: taken at the next start */
+const char *display_aspect_setting(void);
+int display_view_setting(void);
+void display_set_aspect(const char *text);
+void display_set_view(int view);
 /* The picture (display_aspect's shape) centred in a w x h back buffer. */
 void display_fit(unsigned w, unsigned h, unsigned *x, unsigned *y, unsigned *fw, unsigned *fh);
 int display_latency(void);              /* frames the GPU may queue ahead: 1-3 */
