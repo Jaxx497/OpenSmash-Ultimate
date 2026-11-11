@@ -507,6 +507,7 @@ static void hunt_scan(Cpu *c, const u64 args[8], void *ctx) {
  * right, top, bottom), the blast zones (+0xc30), the visible range's centre (+0xeb0) and half height
  * (+0xf38 x +0xf68), its width / height (+0xf58). */
 long long fight_test_frame0(void);   /* (hle_fight_test.c) */
+static int wide_style_stage(void);   /* (below) */
 static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
     (void)c; (void)args; (void)ctx;
     static long long last = -1;
@@ -525,8 +526,9 @@ static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
            vc[0], vc[1], *P(float, m + 0xf38) * *P(float, m + 0xf68), *P(float, m + 0xf58));
     {   /* (SSBU_WIDE_FRAMING: the offset the picture's camera has from the game's, and its goal) */
         extern float wide_now_x, wide_now_y, wide_now_z;
-        extern volatile float shadow_k_out;
-        printf("[camwide] F %lld | offset %.2f %.2f %.2f k %.4f\n", f, wide_now_x, wide_now_y, wide_now_z, shadow_k_out);
+        extern volatile float shadow_k_out, stage_out_k, stage_out_l, stage_out_r;
+        printf("[camwide] F %lld | offset %.2f %.2f %.2f k %.4f view %.1f %.1f\n", f, wide_now_x, wide_now_y, wide_now_z, wide_style_stage() ? stage_out_k : shadow_k_out,
+               stage_out_l, stage_out_r);
     }
     if (getenv("SSBU_CAM_TRACE_OBJ"))   /* (the render camera's start: its inputs) */
         for (u32 o = 0; o < 0x140; o += 0x20) {
@@ -625,7 +627,7 @@ static void framing_dump(Cpu *c) {
  * src x1 = its own); after that copy, that block is moved by the wide offset, eased like a camera:
  * position (inverse view, +0xb0 of the block), look-at (+0x100) and the view's translation (+0x30,
  * minus the offset turned by the view). The game's camera is not touched: the fight is the same. */
-static int wide_style_stage(void);   /* (below) */
+static int wide_style_stage(void), wide_style_shadow(void);   /* (below) */
 static GuestFn *copy_orig;
 static float wide_now[3];
 float wide_now_x, wide_now_y, wide_now_z;   /* (a copy for SSBU_CAM_TRACE) */
@@ -644,7 +646,7 @@ static void wide_apply(u64 block, const float d[3]) {
     float *v = P(float, block), *eye = P(float, block + 0xb0), *at = P(float, block + 0x100);
     wide_applied.block = block;
     memcpy(wide_applied.t, v + 12, 12); memcpy(wide_applied.eye, eye, 12); memcpy(wide_applied.at, at, 12);
-    if (wide_style_stage()) {
+    if (wide_style_stage() || wide_style_shadow()) {
         float k = shadow_k;
         for (int j = 0; j < 3; j++) {
             eye[j] = at[j] + (eye[j] - at[j]) * k + d[j];
@@ -665,6 +667,41 @@ static void wide_restore(void) {
     memcpy(P(float, b) + 12, wide_applied.t, 12); memcpy(P(float, b + 0xb0), wide_applied.eye, 12); memcpy(P(float, b + 0x100), wide_applied.at, 12);
     wide_applied.on = 0;
 }
+/* SSBU_WIDE_STYLE=stage: the game's own camera, its view only widened, as long as that view stays inside
+ * the stage's camera range (the camera manager's +0xc20: left, right); past it, the view first slides
+ * along the stage and then zooms in, only as far as it must. The middle 16:9 - what the game framed -
+ * always stays in view (zoom at most to the 16:9 width, slide at most the extra width). On the
+ * fighters' plane (z = 0): half height = the eye's distance x tan(fov / 2). */
+volatile float stage_out_k = 1, stage_out_dx, stage_out_l, stage_out_r;   /* (for SSBU_CAM_TRACE) */
+static void stage_fit(u64 block) {
+    u64 m = *P(u64, 0x71052b8f00ull), cam = render_camera();
+    m = m ? *P(u64, m) : 0;
+    float k = 1, dx = 0;
+    if (m && cam) {
+        const float *eye = P(float, block + 0xb0), *at = P(float, block + 0x100), *range = P(float, m + 0xc20);
+        float fov = *P(float, cam + 0x15c) * 3.14159265f / 180, L = range[0], R = range[1];
+        float a = display_aspect(), dir[3] = {at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]};
+        float dl = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        float t = dir[2] < -1e-3f ? -eye[2] / dir[2] : 0;   /* (the ray through the look-at, down to the fighters' plane z = 0) */
+        float dist = t * dl;
+        if (t > 0 && dist > 1 && fov > 0.01f && R - L > 1) {
+            float hh = dist * tanf(fov / 2), hw = hh * a, hw169 = hh * (16.0f / 9), cx = eye[0] + dir[0] * t;
+            if (hw > (R - L) / 2) k = (R - L) / 2 / hw;           /* (wider than the stage: zoom in) */
+            if (k < hw169 / hw) k = hw169 / hw;                  /* (never less than what 16:9 shows) */
+            float w = hw * k, room = w - hw169;   /* (how far the view may slide and keep the 16:9 middle) */
+            if (room < 0) room = 0;
+            if (cx - w < L) dx = L - (cx - w);
+            else if (cx + w > R) dx = R - (cx + w);
+            if (dx > room) dx = room;
+            if (dx < -room) dx = -room;
+            stage_out_l = cx + dx - w; stage_out_r = cx + dx + w;
+        }
+    }
+    wide_goal_offset[0] = dx; wide_goal_offset[1] = 0; wide_goal_offset[2] = 0;
+    shadow_k = k;
+    stage_out_k = k; stage_out_dx = dx;
+}
+
 static void wide_copy(Cpu *c) {
     u64 dst = c->x[0];
     copy_orig(c);
@@ -672,7 +709,8 @@ static void wide_copy(Cpu *c) {
     if (!cam || dst != cam + 0x1d0 || !in_fight()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; return; }
     static float ease = -1;
     if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
-    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() ? 1.0f : ease);
+    if (wide_style_stage()) stage_fit(dst);   /* (sets wide_goal_offset and shadow_k) */
+    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() || wide_style_shadow() ? 1.0f : ease);
     wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
     wide_apply(dst, wide_now);
@@ -760,9 +798,14 @@ static void shadow_update(Cpu *c) {
     float ds = sqrtf((sp[0] - sl[0]) * (sp[0] - sl[0]) + (sp[1] - sl[1]) * (sp[1] - sl[1]) + (sp[2] - sl[2]) * (sp[2] - sl[2]));
     float dg = sqrtf((gp[0] - gl[0]) * (gp[0] - gl[0]) + (gp[1] - gl[1]) * (gp[1] - gl[1]) + (gp[2] - gl[2]) * (gp[2] - gl[2]));
     if (dg > 1e-3f && ds == ds && ds / dg > 0.05f && ds / dg < 20) shadow_k = ds / dg;
-    shadow_k_out = wide_style_stage() ? shadow_k : 1;
+    shadow_k_out = wide_style_shadow() ? shadow_k : 1;
     if (d[0] == d[0] && d[1] == d[1] && d[2] == d[2] && fabsf(d[0]) < 2000 && fabsf(d[1]) < 2000 && fabsf(d[2]) < 2000)
         memcpy((void *)wide_goal_offset, d, sizeof d);
+}
+static int wide_style_shadow(void) {   /* (research: the shadow camera above) */
+    static int on = -1;
+    if (on < 0) { const char *v = getenv("SSBU_WIDE_STYLE"); on = v && !_stricmp(v, "shadow"); }
+    return on;
 }
 static int wide_style_stage(void) {
     static int on = -1;
@@ -832,7 +875,7 @@ static u64 render_camera(void) {
 static void hud_call(int k, Cpu *c) {
     u64 cam = render_camera();
     int wide_here = 0;   /* (SSBU_WIDE_FRAMING: the HUD places things where the picture shows them) */
-    if (cam && copy_orig && !wide_applied.on && in_fight() && (wide_now[0] != 0 || wide_now[1] != 0 || wide_now[2] != 0)) {
+    if (cam && copy_orig && !wide_applied.on && in_fight() && (wide_now[0] != 0 || wide_now[1] != 0 || wide_now[2] != 0 || shadow_k != 1)) {
         float d[3] = {wide_now[0], wide_now[1], wide_now[2]};
         wide_apply(cam + 0x1d0, d);
         wide_here = 1;
@@ -1919,8 +1962,8 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
-    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING") && !wide_style_stage())) hook_framing_dump();
-    if (aspect_native() && getenv("SSBU_WIDE_FRAMING") && wide_style_stage()) {
+    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING") && !wide_style_stage() && !wide_style_shadow())) hook_framing_dump();
+    if (aspect_native() && getenv("SSBU_WIDE_FRAMING") && wide_style_shadow()) {
         u64 orig = rt_hook_function(0x71004fdc10ull, rt_native(shadow_update, "ultrawide shadow camera"));
         if (orig) upd_orig = rt_lookup(orig);
         u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(rec_frame_call, "ultrawide framing recorder"));
