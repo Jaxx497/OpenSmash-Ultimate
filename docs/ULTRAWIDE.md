@@ -210,7 +210,16 @@ F4 draw log of a fight (`SSBU_GFX_LOG_CB=all`), **measured**:
 - The 12 functions given 16:9's projection (`main+0x1341670`, `+0x134c690`, `+0x135ccb0`, `+0x13955d0`,
   `+0x13a3f50`, `+0x13a53d0`, `+0x13a67c0`, `+0x13adb10`, `+0x13c8460`, `+0x13ca580`, `+0x13e29d0`,
   `+0x142aed0`): the ones that load the render camera and read +0x290, in that part of `main`. Tags land
-  on their fighters with all 12 (**measured**); which of them are needed is not known.
+  on their fighters with all 12 (**measured**); which of them are needed is not known. In a fight 7 run,
+  once a frame each (`+0x135ccb0`, `+0x13955d0`, `+0x13a3f50`, `+0x13adb10`, `+0x13c8460`, `+0x13ca580`,
+  `+0x142aed0`); `+0x1341670` and `+0x134c690` not at all.
+- They take the **view** from the render camera's own matrix (`cam+0x0`, translation `+0x30`), not from
+  the drawing block (`cam+0x1d0`) the views move, and the projection through `*(main+0x53375a8)` (the same
+  camera). So the zoom and slide never reached the tags (owner, 2026-11-11: "tags broken on zoomed and
+  hybrid"). Fixed: while one runs, the moved translation is put in `cam+0x0` too and put back after (only
+  when its rotation is the block's). Bridge of Eldin replay: wide, zoomed, hybrid the same as 16:9.
+  `+0x1341670` with bit 0 of x2 builds its view from the camera manager instead (`M+0xeb0`, `+0xec0`, up
+  `+0xee0`; look-at in `f_7103559a30`): not seen in fights.
 - `sv_camera_manager::world_to_screen` (`main+0x22832c0` -> `f_7101341280`): layout pixels, centre
   (960, 540); in a fight only ever returned the centre (**measured**). Not what places the tags.
 - `kozukatasight::screen_width` (`main+0x1646f00`) reads a global at `main+0x744701c` (1920 when 0).
@@ -230,6 +239,12 @@ python tools/dev/fight_hash_diff.py build/aspect_test/verify/run169.fh.txt build
 Results (2026-11-10): 16:9 vs 32:9 native with the 16:9 framing: the same over 4036 lines. 16:9 vs 32:9
 with the game camera widened: first difference frame 578, damage. A stage not named in
 `SSBU_DEBUG_MATCH` comes from the menus, so two runs can differ in stage: name it.
+
+**Scripted live fights jitter** (2026-11-11, `build\aspect_test\auto\mktags.py`, the menu route of
+`cmp169`): the same `SSBU_SEQ` polls land the first stick press a frame early or late now and then
+(frame 328 or 329, any view, even the same build twice), and the fights part from there. Good for
+looking at tags (replays draw none), not for proving a fight the same: use the replays. Tags fade a
+few seconds into a fight (16:9 too).
 
 ## Tried and dropped
 

@@ -898,12 +898,23 @@ static void hud_call(int k, Cpu *c) {
         wide_apply(cam + 0x1d0, d);
         wide_here = 1;
     }
+    /* The HUD's world-to-screen functions take the view from the camera's own matrix (+0x0), not
+     * from the drawing block (+0x1d0) the views move: while one runs, the moved translation is put
+     * there too (the rotation is the same; checked, so a different layout is left alone). */
+    float view_t[3];
+    int view_here = 0;
+    if (cam && wide_applied.on && wide_applied.block == cam + 0x1d0 && !memcmp(P(float, cam), P(float, cam + 0x1d0), 48)) {
+        memcpy(view_t, P(float, cam) + 12, 12);
+        memcpy(P(float, cam) + 12, P(float, cam + 0x1d0) + 12, 12);
+        view_here = 1;
+    }
     float *p = cam ? P(float, cam + 0x290) : NULL, *inv = cam ? P(float, cam + 0x2d0) : NULL;
     float wide = display_aspect() / (16.0f / 9);
     int swap = p && *P(float, cam + 0x168) == 1080.0f && InterlockedIncrement(&hud_depth) == 1;   /* (outermost only) */
     float p0 = 0, i0 = 0;
     if (swap) { p0 = p[0]; i0 = inv[0]; p[0] = p0 * wide; inv[0] = i0 / wide; }
     hud_orig[k](c);
+    if (view_here) memcpy(P(float, cam) + 12, view_t, 12);
     if (wide_here) wide_restore();
     if (swap) { p[0] = p0; inv[0] = i0; }
     if (p && *P(float, cam + 0x168) == 1080.0f) InterlockedDecrement(&hud_depth);
