@@ -29,7 +29,9 @@ void display_note_refresh(int hz);                /* the window's monitor refres
 #endif
 /* The renderer, at a present: the window's client size, when it changed since the last call. */
 int display_take_size(unsigned *w, unsigned *h);
-/* The 16:9 picture centred in a w x h back buffer. */
+/* The picture's shape, width over height: 16:9 unless SSBU_ASPECT says otherwise (gpu_display.c). */
+float display_aspect(void);
+/* The picture (display_aspect's shape) centred in a w x h back buffer. */
 void display_fit(unsigned w, unsigned h, unsigned *x, unsigned *y, unsigned *fw, unsigned *fh);
 int display_latency(void);              /* frames the GPU may queue ahead: 1-3 */
 int display_low_latency(void);          /* low_latency: the game released late in the frame (ipc_vi.c) */

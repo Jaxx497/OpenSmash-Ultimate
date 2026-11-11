@@ -295,6 +295,19 @@ Pacing display_pacing(void) { load(); return cfg.pacing; }
 const char *display_gpu(void) { load(); return cfg.gpu; }
 float display_render_scale(void) { load(); return cfg.render_scale; }
 int display_renderer(void) { load(); return cfg.renderer; }
+/* SSBU_ASPECT (prototype): the picture's shape, "W:H" (43:18 for 3440x1440) or a number; 16:9 without.
+ * ponytail: env only, no display.ini key or menu entry until the prototype proves out */
+float display_aspect(void) {
+    static float aspect;
+    if (aspect == 0) {
+        const char *e = getenv("SSBU_ASPECT");
+        float a = 0, w, h;
+        if (e && sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
+        else if (e) a = (float)atof(e);
+        aspect = a >= 1.0f && a <= 4.0f ? a : 16.0f / 9;
+    }
+    return aspect;
+}
 
 /* (the settings menu) the render scale it saved: shown from now on, the renderer's own counts
  * only at the next start */
@@ -478,8 +491,9 @@ int display_take_size(unsigned *w, unsigned *h) {
 }
 
 void display_fit(unsigned w, unsigned h, unsigned *x, unsigned *y, unsigned *fw, unsigned *fh) {
-    if ((unsigned long long)w * 9 > (unsigned long long)h * 16) { *fh = h; *fw = h * 16 / 9; }   /* wider: bars left and right */
-    else { *fw = w; *fh = w * 9 / 16; }
+    float a = display_aspect();
+    if ((float)w > (float)h * a) { *fh = h; *fw = (unsigned)((float)h * a + 0.5f); }   /* wider: bars left and right */
+    else { *fw = w; *fh = (unsigned)((float)w / a + 0.5f); }
     if (!*fw) *fw = 1;
     if (!*fh) *fh = 1;
     *x = (w - *fw) / 2;
@@ -523,8 +537,8 @@ int display_message(HWND h, UINT msg, WPARAM w, LPARAM l, LRESULT *result) {
         RECT *r = (RECT *)l, f = frame_of((DWORD)GetWindowLongPtrW(h, GWL_STYLE), GetDpiForWindow(h));
         int fw = f.right - f.left, fh = f.bottom - f.top;
         int cw = r->right - r->left - fw, ch = r->bottom - r->top - fh;
-        if (w == WMSZ_TOP || w == WMSZ_BOTTOM) cw = ch * 16 / 9;
-        else ch = cw * 9 / 16;
+        if (w == WMSZ_TOP || w == WMSZ_BOTTOM) cw = (int)((float)ch * display_aspect() + 0.5f);
+        else ch = (int)((float)cw / display_aspect() + 0.5f);
         if (w == WMSZ_TOP || w == WMSZ_TOPLEFT || w == WMSZ_TOPRIGHT) r->top = r->bottom - ch - fh;
         else r->bottom = r->top + ch + fh;
         if (w == WMSZ_LEFT || w == WMSZ_TOPLEFT || w == WMSZ_BOTTOMLEFT) r->left = r->right - cw - fw;

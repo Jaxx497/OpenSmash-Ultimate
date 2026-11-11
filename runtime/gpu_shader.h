@@ -163,5 +163,9 @@ u32 shader_size(const u8 *program, u32 max);
 /* Does the program read its pixel's position or step in texels (its translation then takes the
  * render scale into account)? */
 int shader_uses_pixels(const u8 *program, u32 size, int stage);
+/* SSBU_ASPECT (gpu_d3d11.c sets it before any translation): vertex programs scale a perspective
+ * vertex's x (w != 1) by params.fix.x and keep only its sign for the rest (w = 1: 2D, full-screen
+ * passes), so 3D is drawn at the wider picture's shape while 2D keeps the game's. */
+extern int shader_wide_clip;
 /* Does the program use the SSY/PBK stacks (translated without them since)? */
 int shader_uses_stacks(const u8 *program, u32 size);

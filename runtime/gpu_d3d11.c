@@ -268,8 +268,10 @@ static int scale_skipped(u32 w, u32 h) {
  * requires. A target too big to scale stays at the game's size. */
 static void scaled_size(u32 w, u32 h, u32 *hw, u32 *hh) {
     *hw = w; *hh = h;
-    if (render_scale == 1.0f || scale_skipped(w, h)) return;
-    float x = (float)w * render_scale + 0.5f, y = (float)h * render_scale + 0.5f;
+    /* SSBU_ASPECT: every target this much wider than tall, as the camera's projection now is */
+    float wide = (u64)w * 9 == (u64)h * 16 ? display_aspect() / (16.0f / 9) : 1.0f;   /* (16:9 targets only: not shadow maps) */
+    if ((render_scale == 1.0f && wide == 1.0f) || scale_skipped(w, h)) return;
+    float x = (float)w * render_scale * wide + 0.5f, y = (float)h * render_scale + 0.5f;
     if (x < 1) x = 1;
     if (y < 1) y = 1;
     if (x > 16384 || y > 16384) return;
@@ -789,13 +791,14 @@ static BOOL CALLBACK init(PINIT_ONCE o, PVOID p, PVOID *c) {
     }
     if (scale < 0.5f || scale > 4) scale = 1;
     render_scale = scale;
+    shader_wide_clip = display_aspect() != 16.0f / 9;
     u32 pw, ph;
     scaled_size(1920, 1080, &pw, &ph);
     if (!make_final(pw, ph)) {
         fprintf(stderr, "[gfx] cannot create the picture's texture\n");
         return TRUE;
     }
-    if (render_scale != 1.0f)
+    if (pw != 1920 || ph != 1080)
         fprintf(stderr, "[gfx] render scale %.3g%s: the game's 1920x1080 drawn at %ux%u\n", render_scale,
                 display_render_scale() == 0 ? " (auto)" : "", pw, ph);
     start_compilers();
@@ -2327,6 +2330,7 @@ static Shader *find_shader_ex(u64 g, int stage, u32 vs_outputs, const CbBinding 
     if (stage == SHADER_COMPUTE) h = (h ^ ((u64)local[0] | (u64)local[1] << 16 | (u64)local[2] << 32 | (u64)shared << 40)) * 1099511628211ull;
     u64 program_hash = h;   /* (the shader's name) */
     h = shader_cache_hash(h, p, size, stage);
+    if (stage == SHADER_VERTEX && shader_wide_clip) h = (h ^ 0x7769646530303031ull) * 1099511628211ull;   /* ("wide0001": SSBU_ASPECT's own files) */
     u64 key_hash = h;   /* (before the alpha test's salt: the key tools/shader_aot.py knows the program by) */
     /* (the salt changes with the alpha test's code, so cache files of an older form are not used) */
     if (alpha_tested) h = (h ^ 0x616C706861743032ull) * 1099511628211ull;
@@ -4324,7 +4328,8 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     vp.TopLeftX *= rt_sx; vp.Width *= rt_sx;
     vp.TopLeftY *= rt_sy; vp.Height *= rt_sy;
     if (memcmp(&cur.vp, &vp, sizeof vp)) { ID3D11DeviceContext_RSSetViewports(ctx, 1, &vp); cur.vp = vp; }
-    params.fix[0] = sx < 0 ? -1.0f : 1.0f;
+    /* SSBU_ASPECT: on a widened target, perspective x squeezed back to the game's shape (shader_wide_clip) */
+    params.fix[0] = (sx < 0 ? -1.0f : 1.0f) * (rt_sx > rt_sy * 1.001f ? rt_sy / rt_sx : 1.0f);
     params.fix[1] = sy < 0 ? 1.0f : -1.0f;
     params.fix[2] = minus_one ? 0.5f : 1.0f;
     params.fix[3] = minus_one ? 0.5f : 0.0f;
