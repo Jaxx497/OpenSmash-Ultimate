@@ -237,6 +237,26 @@ with the game camera widened: first difference frame 578, damage. A stage not na
 - Panning the render camera to keep the stage's range in view, with the rest dimmed (2026-11-11):
   no dimming seen; reverted.
 
+## To do (agreed with the owner)
+
+1. **"Stage" camera style, fight-identical**: a shadow camera - the game's own camera update
+   (`f_71004fdc10`, `f_71004fec80`) run on a copy of the camera with the wide aspect; only the picture
+   follows it. Checked by replay hash.
+2. **Magnifying glass at the wide edge**: the game clamps the bubble to its 16:9 screen, and the HUD is
+   squeezed into the middle 16:9, so the bubble sits on the old 16:9 edge. Clamp it to the picture's
+   edge instead and let its draws through the 2D clip box. When it shows stays the 16:9 rule's (a
+   useful cue near the blast zone).
+3. **Keep drawing the fighter in the bubble**: the game hides the fighter's model when it bubbles it;
+   keep drawing it while it is inside the wide picture (visual only), bubble shown too.
+4. **Settings**: a `display.ini` key for the aspect (`auto` from the monitor, `16:9`, `21:9`, `32:9`, ...)
+   and for the camera style (`full`, `stage`), and both in the in-game settings menu.
+5. **Menus and loading screens**: fill the sides (black, or a blur of the middle) where nothing draws.
+6. **HUD layout options**: damage meters and the minimap placed for wide screens.
+7. **Vulkan and Metal**: the same changes in the other renderers (Direct3D 11 only now).
+8. **Clean-up before shipping**: remove the research switches and hooks (hunts, dumps, F9 picker,
+   `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP`); keep `SSBU_GAME_FRAMING_WIDE` as the
+   reference while it is useful; online stays 16:9 until a fight-hash test of each camera style passes.
+
 ## Open
 
 - Camera feel: with the 16:9 framing the wide picture shows past the stage's range. The widened
