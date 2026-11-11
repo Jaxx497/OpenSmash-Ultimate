@@ -72,6 +72,7 @@ typedef struct Surface {
     u32 width, height, format, depth;     /* the game's size: what the surface is known and matched by */
     u32 hw, hh;                           /* the host texture's size (the game's, scaled) */
     float sx, sy;                         /* hw / width, hh / height */
+    float wide;                           /* SSBU_ASPECT: how much wider than the game's shape (1: not widened) */
     DXGI_FORMAT storage, view;            /* the texture's format, and how it is rendered to and sampled */
     ID3D11Texture2D *tex;
     ID3D11RenderTargetView *rtv;
@@ -266,16 +267,17 @@ static int scale_skipped(u32 w, u32 h) {
 /* The host size of a w x h render target. It depends on the game's size only (never the format
  * or depth), so a colour target and the depth target drawn with it always match, as Direct3D
  * requires. A target too big to scale stays at the game's size. */
-static void scaled_size(u32 w, u32 h, u32 *hw, u32 *hh) {
+static float scaled_size(u32 w, u32 h, u32 *hw, u32 *hh) {   /* (returns the widening it applied, 1 for none) */
     *hw = w; *hh = h;
     /* SSBU_ASPECT: every target this much wider than tall, as the camera's projection now is */
     float wide = (u64)w * 9 == (u64)h * 16 ? display_aspect() / (16.0f / 9) : 1.0f;   /* (16:9 targets only: not shadow maps) */
-    if ((render_scale == 1.0f && wide == 1.0f) || scale_skipped(w, h)) return;
+    if ((render_scale == 1.0f && wide == 1.0f) || scale_skipped(w, h)) return 1.0f;
     float x = (float)w * render_scale * wide + 0.5f, y = (float)h * render_scale + 0.5f;
     if (x < 1) x = 1;
     if (y < 1) y = 1;
-    if (x > 16384 || y > 16384) return;
+    if (x > 16384 || y > 16384) return 1.0f;
     *hw = (u32)x; *hh = (u32)y;
+    return wide;
 }
 
 /* The host texture standing for the render target at `guest`, created on first use. */
@@ -315,7 +317,7 @@ static Surface *surface(u64 guest, u32 width, u32 height, u32 format, int depth)
         }
     }
     u32 hw, hh;
-    scaled_size(width, height, &hw, &hh);
+    float wide = scaled_size(width, height, &hw, &hh);
     D3D11_TEXTURE2D_DESC td = {hw, hh, 1, 1, storage, {1, 0}, D3D11_USAGE_DEFAULT,
                                D3D11_BIND_SHADER_RESOURCE | (depth ? D3D11_BIND_DEPTH_STENCIL : D3D11_BIND_RENDER_TARGET), 0, 0};
     if (FAILED(ID3D11Device_CreateTexture2D(dev, &td, NULL, &s->tex))) { s->tex = NULL; return NULL; }
@@ -325,6 +327,7 @@ static Surface *surface(u64 guest, u32 width, u32 height, u32 format, int depth)
     s->guest = guest; s->width = width; s->height = height; s->format = format;
     s->hw = hw; s->hh = hh;
     s->sx = (float)hw / (float)width; s->sy = (float)hh / (float)height;
+    s->wide = wide;
     s->used = ++tick;
     return s;
 }
@@ -3478,7 +3481,7 @@ static ID3D11ShaderResourceView *get_texture(const u32 *tic, u32 shader_type, fl
         if (!rt || s->used > rt->used) rt = s;
     }
     if (rt && draw_logging) note_sampled(rt);
-    if (rt && rt->sx > rt->sy * 1.001f) draw_reads_wide = 1;
+    if (rt && rt->wide > 1.0f) draw_reads_wide = 1;
     if (rt) { *scale = rt->sx; return surface_srv(rt, (int)d.srgb); }
     if (!ok || d.type == TIC_1D_BUFFER || d.bytes == 0) { warn_texture(&d); return NULL; }
     u32 layers = d.type == TIC_CUBE ? 6 : d.type == TIC_CUBE_ARRAY ? 6 * d.depth : d.type == TIC_2D_ARRAY || d.type == TIC_1D_ARRAY ? d.depth : 1;
@@ -4284,12 +4287,13 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     ID3D11DepthStencilView *dsv = NULL;
     u32 sel = regs[M_CT_SELECT], count = sel & 15, rt_w = 0, rt_h = 0;
     float rt_sx = 1.0f, rt_sy = 1.0f;   /* the targets' render scale: host pixels per game pixel */
+    float rt_wide = 1.0f;               /* (SSBU_ASPECT: the first colour target's widening) */
     for (u32 i = 0; i < count && i < 8; i++) {
         u32 ct = (sel >> (4 + 3 * i)) & 7;
         u64 va = (u64)regs[M_CT(ct)] << 32 | regs[M_CT(ct) + 1];
         if (!va || !regs[M_CT(ct) + 4]) continue;
         Surface *sf = surface(gpu_va_to_guest(va), regs[M_CT(ct) + 2], regs[M_CT(ct) + 3], regs[M_CT(ct) + 4], 0);
-        if (sf) { rtv[i] = sf->rtv; if (!rt_w) { rt_w = sf->width; rt_h = sf->height; rt_sx = sf->sx; rt_sy = sf->sy; } }
+        if (sf) { rtv[i] = sf->rtv; if (!rt_w) { rt_w = sf->width; rt_h = sf->height; rt_sx = sf->sx; rt_sy = sf->sy; rt_wide = sf->wide; } }
     }
     if (regs[M_ZT_SELECT] & 1) {
         u64 va = (u64)regs[M_ZT_A] << 32 | regs[M_ZT_A + 1];
@@ -4530,7 +4534,24 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
      * bloom, the lighting passes). 3D effects that read the scene (soft particles) test depth.
      * ponytail: per-draw heuristic, no shader change (a new vertex shader costs every player ~1 h
      * of compiling); a fade without a texture is squeezed too - check one if bars show */
-    if (rt_sx > rt_sy * 1.001f && !(draw_reads_wide && !((regs[M_DEPTH_TEST] & 1) && dsv))) params.fix[0] *= rt_sy / rt_sx;
+    int depth_on = (regs[M_DEPTH_TEST] & 1) && dsv;
+    if (rt_wide > 1.0f && !(draw_reads_wide && !depth_on)) {
+        params.fix[0] /= rt_wide;
+        /* A 2D draw (no depth test: the HUD, menus) stays inside the middle 16:9: the game parks
+         * hidden panels just off its screen, which the squeeze would bring into view. Its scissor
+         * (in the game's pixels) is squeezed towards the middle with it. 3D keeps the full width. */
+        if (!depth_on) {
+            float l = 0, r = (float)rt_w, cx = (float)rt_w / 2;
+            if (regs[M_SCISSOR(0)] & 1) { u32 sh = regs[M_SCISSOR(0) + 1]; l = (float)(sh & 0xFFFF); r = (float)(sh >> 16); }
+            if (l < 0) l = 0;
+            if (r > (float)rt_w) r = (float)rt_w;   /* (a scissor past the screen still stops at its edge) */
+            D3D11_RECT sr = cur.scissor;
+            sr.left = (LONG)floorf((cx + (l - cx) / rt_wide) * rt_sx);
+            sr.right = (LONG)ceilf((cx + (r - cx) / rt_wide) * rt_sx);
+            if (memcmp(&cur.scissor, &sr, sizeof sr)) { ID3D11DeviceContext_RSSetScissorRects(ctx, 1, &sr); cur.scissor = sr; }
+        }
+    }
+    if (draw_logging && rt_wide > 1.0f) fprintf(stderr, "[draw]   aspect: x %g (reads wide %d, depth %d)\n", params.fix[0], draw_reads_wide, (int)((regs[M_DEPTH_TEST] & 1) && dsv));
 
     /* per-draw parameters */
     if (!params_buffer) {
