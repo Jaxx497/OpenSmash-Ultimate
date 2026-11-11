@@ -163,6 +163,17 @@ The camera update (`f_71004fdc10`) then calls `f_71004fec80` twice: with s0 = th
 x3 = +0x118. These move the camera's state; the zoom is likely there. Setting the stored aspect even
 only during the second `f_71004fe4f0` call changed the fight (frame 2474): it is read by logic.
 
+### Decisions (owner, 2026-11-11)
+
+- Two camera styles, both kept as options: **full** (the visual-only framing as it is: everything the
+  fight could need is in view, past the stage if need be) and **stage** (the liked mode's look: the view
+  clamped to the stage's camera range at the full width, zoom fitted to the wide picture), the latter
+  to be made fight-identical with a shadow camera (the game's own camera update run on a copy).
+- The magnifying glass stays where the 16:9 rules put it: it marks a fighter nearing the blast zone,
+  which is when it shows anyway. Drawing the fighter instead is for later.
+- Stages whose floor runs to the blast zones (Bridge of Eldin) show the oddities most; competitive
+  rulesets ban them.
+
 ## Driving the game without a person
 
 `build\aspect_test\auto\*.bat` (made by `mk.py` there): `SSBU_SEQ` walks the menus - title (A at tick
