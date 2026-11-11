@@ -791,7 +791,6 @@ static BOOL CALLBACK init(PINIT_ONCE o, PVOID p, PVOID *c) {
     }
     if (scale < 0.5f || scale > 4) scale = 1;
     render_scale = scale;
-    shader_wide_clip = display_aspect() != 16.0f / 9;
     u32 pw, ph;
     scaled_size(1920, 1080, &pw, &ph);
     if (!make_final(pw, ph)) {
@@ -2330,7 +2329,6 @@ static Shader *find_shader_ex(u64 g, int stage, u32 vs_outputs, const CbBinding 
     if (stage == SHADER_COMPUTE) h = (h ^ ((u64)local[0] | (u64)local[1] << 16 | (u64)local[2] << 32 | (u64)shared << 40)) * 1099511628211ull;
     u64 program_hash = h;   /* (the shader's name) */
     h = shader_cache_hash(h, p, size, stage);
-    if (stage == SHADER_VERTEX && shader_wide_clip) h = (h ^ 0x7769646530303031ull) * 1099511628211ull;   /* ("wide0001": SSBU_ASPECT's own files) */
     u64 key_hash = h;   /* (before the alpha test's salt: the key tools/shader_aot.py knows the program by) */
     /* (the salt changes with the alpha test's code, so cache files of an older form are not used) */
     if (alpha_tested) h = (h ^ 0x616C706861743032ull) * 1099511628211ull;
@@ -3460,6 +3458,7 @@ static ID3D11Texture2D *unpack_texture(ID3D11Texture2D *bc, const TextureDesc *d
     return out;
 }
 
+static int draw_reads_wide;   /* (SSBU_ASPECT: the draw being bound samples a widened target) */
 static ID3D11ShaderResourceView *get_texture(const u32 *tic, u32 shader_type, float *scale) {
     TextureDesc d;
     *scale = 1.0f;
@@ -3479,6 +3478,7 @@ static ID3D11ShaderResourceView *get_texture(const u32 *tic, u32 shader_type, fl
         if (!rt || s->used > rt->used) rt = s;
     }
     if (rt && draw_logging) note_sampled(rt);
+    if (rt && rt->sx > rt->sy * 1.001f) draw_reads_wide = 1;
     if (rt) { *scale = rt->sx; return surface_srv(rt, (int)d.srgb); }
     if (!ok || d.type == TIC_1D_BUFFER || d.bytes == 0) { warn_texture(&d); return NULL; }
     u32 layers = d.type == TIC_CUBE ? 6 : d.type == TIC_CUBE_ARRAY ? 6 * d.depth : d.type == TIC_2D_ARRAY || d.type == TIC_1D_ARRAY ? d.depth : 1;
@@ -4328,8 +4328,7 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     vp.TopLeftX *= rt_sx; vp.Width *= rt_sx;
     vp.TopLeftY *= rt_sy; vp.Height *= rt_sy;
     if (memcmp(&cur.vp, &vp, sizeof vp)) { ID3D11DeviceContext_RSSetViewports(ctx, 1, &vp); cur.vp = vp; }
-    /* SSBU_ASPECT: on a widened target, perspective x squeezed back to the game's shape (shader_wide_clip) */
-    params.fix[0] = (sx < 0 ? -1.0f : 1.0f) * (rt_sx > rt_sy * 1.001f ? rt_sy / rt_sx : 1.0f);
+    params.fix[0] = sx < 0 ? -1.0f : 1.0f;
     params.fix[1] = sy < 0 ? 1.0f : -1.0f;
     params.fix[2] = minus_one ? 0.5f : 1.0f;
     params.fix[3] = minus_one ? 0.5f : 0.0f;
@@ -4521,8 +4520,17 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     params.base[0] = regs[M_GLOBAL_BASE_VERTEX];
     params.base[1] = regs[M_GLOBAL_BASE_INSTANCE] + instance_counter;
 
+    draw_reads_wide = 0;
     bind_resources(regs, cb, SHADER_VERTEX, vs, &params);
     if (ps) bind_resources(regs, cb, SHADER_PIXEL, ps, &params);
+    /* SSBU_ASPECT: on a widened target every draw is squeezed back to the game's 16:9 shape (x times
+     * 16:9 over the aspect: 3D then keeps its proportions and shows more at the sides; the HUD sits in
+     * the middle 16:9, over the fighters its tags follow), except a full-screen pass, which must
+     * cover the whole width: one that reads a widened target with no depth test (tone mapping,
+     * bloom, the lighting passes). 3D effects that read the scene (soft particles) test depth.
+     * ponytail: per-draw heuristic, no shader change (a new vertex shader costs every player ~1 h
+     * of compiling); a fade without a texture is squeezed too - check one if bars show */
+    if (rt_sx > rt_sy * 1.001f && !(draw_reads_wide && !((regs[M_DEPTH_TEST] & 1) && dsv))) params.fix[0] *= rt_sy / rt_sx;
 
     /* per-draw parameters */
     if (!params_buffer) {

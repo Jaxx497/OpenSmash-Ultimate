@@ -1859,14 +1859,10 @@ static void put_fetch(Str *out, u32 n) {
              "}\n", n, n, n);
 }
 
-int shader_wide_clip;
 static void put_finish(Str *out, int msl) {
     put(out, "VSOut finish(VSOut o) {\n"
-             "  o.clipw = o.pos.w;\n");
-    /* ponytail: perspective told apart by w != 1 - a 3D vertex exactly 1 unit away is left wide */
-    if (shader_wide_clip) put(out, "  o.pos.x *= abs(o.pos.w - 1.0f) > 1e-5f ? abs(params.fix.x) : 1.0f;\n");
-    put(out, shader_wide_clip ? "  o.pos.x *= sign(params.fix.x);\n" : "  o.pos.x *= params.fix.x;\n");
-    put(out, "  o.pos = float4(o.pos.x, o.pos.y * params.fix.y, o.pos.z * params.fix.z + o.pos.w * params.fix.w, o.pos.w);\n"
+             "  o.clipw = o.pos.w;\n"
+             "  o.pos = float4(o.pos.x * params.fix.x, o.pos.y * params.fix.y, o.pos.z * params.fix.z + o.pos.w * params.fix.w, o.pos.w);\n"
              "%s"
              "  return o;\n}\n", msl ? "  o.psize_ = 1.0f;\n" : "");
 }
