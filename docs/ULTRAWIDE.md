@@ -171,6 +171,9 @@ fighters jump to x 1100 / 0 for the results).
   fight could need is in view, past the stage if need be) and **stage** (the liked mode's look: the view
   clamped to the stage's camera range at the full width, zoom fitted to the wide picture), the latter
   to be made fight-identical with a shadow camera (the game's own camera update run on a copy).
+- The "stage" style's zoom exists only to hide what lies past the stage (owner, 2026-11-11): stay as
+  zoomed out as the full style, slide along the stage first, zoom in only as far as needed to keep
+  the picture inside the stage's camera range. The zoomed-out look is preferred.
 - The magnifying glass stays where the 16:9 rules put it: it marks a fighter nearing the blast zone,
   which is when it shows anyway. Drawing the fighter instead is for later.
 - Stages whose floor runs to the blast zones (Bridge of Eldin) show the oddities most; competitive
