@@ -141,6 +141,28 @@ reads; same replay):
 The fighters' own box is not kept: the game works it out and stores only the 16:9 result. A wide
 framing needs it (spread sideways: zoom in; spread up and down: cannot).
 
+### The liked mode against the visual-only framing (measured 2026-11-11)
+
+`SSBU_GAME_FRAMING_WIDE=1` (with `SSBU_ASPECT_NATIVE`) is the mode the owner liked: the game's own camera
+framing told the wide aspect. It changes the fight (kept for reference: `build\aspect_test\liked.bat`,
+offline only). A live 1v1 on Bridge of Eldin in it, against the owner's 16:9 replay of the same match-up
+and the visual-only framing (`SSBU_WIDE_FRAMING`), view half height by the fighters' spread:
+
+| spread | 16:9 | liked | visual-only |
+| :--- | :--- | :--- | :--- |
+| 0-49 | 42 | 41 | 42 |
+| 150-199 | 64 | 61 | 59 |
+| 300+ | 95 | 48 | 84 |
+
+The liked mode keeps a close shot when the fighters spread out (the wide picture covers them), and
+slides off their middle to stay inside the stage's range; past the range at spread 300+: 0. The
+visual-only framing zooms out as 16:9 does: 259 past. So the zoom is not decided by `f_71004fe4f0`.
+
+The camera update (`f_71004fdc10`) then calls `f_71004fec80` twice: with s0 = the stored aspect
+(+0x134), x2 = +0x70 (the camera's now), x3 = +0x110; and with s0 = main+0x4472c5c (16:9), x2 = +0xc0,
+x3 = +0x118. These move the camera's state; the zoom is likely there. Setting the stored aspect even
+only during the second `f_71004fe4f0` call changed the fight (frame 2474): it is read by logic.
+
 ## Driving the game without a person
 
 `build\aspect_test\auto\*.bat` (made by `mk.py` there): `SSBU_SEQ` walks the menus - title (A at tick

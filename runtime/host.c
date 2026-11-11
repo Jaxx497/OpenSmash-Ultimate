@@ -523,6 +523,10 @@ static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
            " | visible centre %.2f %.2f half-height %.2f aspect %.4f\n",
            f, pos[0], pos[1], pos[2], *P(float, cam + 0x15c), *P(float, cam + 0x164), rg[0], rg[1], rg[2], rg[3], dz[0], dz[1], dz[2], dz[3],
            vc[0], vc[1], *P(float, m + 0xf38) * *P(float, m + 0xf68), *P(float, m + 0xf58));
+    {   /* (SSBU_WIDE_FRAMING: the offset the picture's camera has from the game's, and its goal) */
+        extern float wide_now_x, wide_now_y, wide_now_z;
+        printf("[camwide] F %lld | offset %.2f %.2f %.2f\n", f, wide_now_x, wide_now_y, wide_now_z);
+    }
     if (getenv("SSBU_CAM_TRACE_OBJ"))   /* (the render camera's start: its inputs) */
         for (u32 o = 0; o < 0x140; o += 0x20) {
             const float *v = P(float, cam + o);
@@ -556,6 +560,15 @@ static void framing_dump(Cpu *c) {
             }
         fflush(stdout);
     }
+    static int game_wide = -1;   /* (research: SSBU_GAME_FRAMING_WIDE, the game's own framing widened - changes the fight) */
+    if (game_wide < 0) game_wide = getenv("SSBU_GAME_FRAMING_WIDE") != NULL;
+    if (game_wide) {
+        u64 cam = c->x[0], src = *P(u64, cam + 0x8);
+        float a = display_aspect(), *own = P(float, cam + 0x134), *from = src ? P(float, src + 0x128) : NULL;
+        if (from && fabsf(*from - 16.0f / 9) < 1e-3f) *from = a;
+        if (fabsf(*own - 16.0f / 9) < 1e-3f) *own = a;
+        if (fabsf(c->v[0].f[0] - 16.0f / 9) < 1e-3f) c->v[0].f[0] = a;
+    }
     static int shadow = -1;
     if (shadow < 0) shadow = getenv("SSBU_FRAMING_SHADOW") || getenv("SSBU_WIDE_FRAMING");
     if (!shadow) { fdump_orig(c); return; }
@@ -577,7 +590,15 @@ static void framing_dump(Cpu *c) {
     s.v[0].f[0] = display_aspect();
     s.sp = base - 0x10;
     s.x[30] = 0;
+    /* (the camera's stored aspect too, as the liked mode had it, for this call only) */
+    u64 cam0 = args.x[0], src0 = *P(u64, cam0 + 0x8);
+    float *own = P(float, cam0 + 0x134), *from = src0 ? P(float, src0 + 0x128) : NULL, own0 = *own, from0 = from ? *from : 0;
+    static int stored = -1;
+    if (stored < 0) stored = getenv("SSBU_WIDE_FRAMING_STORED") != NULL;   /* (research: changes the fight, frame 2474 of the Eldin replay) */
+    if (stored) { *own = display_aspect(); if (from) *from = display_aspect(); }
     fdump_orig(&s);
+    *own = own0;
+    if (from) *from = from0;
     {   /* (SSBU_WIDE_FRAMING: how far the wide goal's position is from the game's) */
         const float *gp = P(float, args.x[2] + 0x30), *wp = P(float, goal + 0x30);
         float d[3] = {wp[0] - gp[0], wp[1] - gp[1], wp[2] - gp[2]};
@@ -605,6 +626,7 @@ static void framing_dump(Cpu *c) {
  * minus the offset turned by the view). The game's camera is not touched: the fight is the same. */
 static GuestFn *copy_orig;
 static float wide_now[3];
+float wide_now_x, wide_now_y, wide_now_z;   /* (a copy for SSBU_CAM_TRACE) */
 static u64 render_camera(void);   /* (below) */
 /* In a fight: the fighters' frame line ran in the last quarter second (a frame hook of its own). */
 static volatile u64 fight_line_at;
@@ -639,6 +661,7 @@ static void wide_copy(Cpu *c) {
     static float ease = -1;
     if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
     for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * ease;
+    wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
     wide_apply(dst, wide_now);
 }
@@ -1791,7 +1814,7 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
-    if (getenv("SSBU_FRAMING_DUMP") || (aspect_native() && getenv("SSBU_WIDE_FRAMING"))) hook_framing_dump();
+    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING"))) hook_framing_dump();
     if (aspect_native() && getenv("SSBU_WIDE_FRAMING")) {
         u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));
         if (orig) copy_orig = rt_lookup(orig);
