@@ -214,6 +214,10 @@ static int seq_steps(void) {
     return (int)fight_steps(&steps, fighters[0].frame, ready_go());
 }
 
+/* The first fighter's fight frame, as SSBU_FIGHT_HASH's lines number it (0: no fight seen). For
+ * SSBU_CAM_TRACE (host.c), whose lines join the hash log's on it. */
+long long fight_test_frame0(void) { return fighter_count ? fighters[0].frame : 0; }
+
 /* ---- SSBU_FIXED_SEED -------------------------------------------------------------------- */
 static int fixed_on;
 static u64 fixed_state;
