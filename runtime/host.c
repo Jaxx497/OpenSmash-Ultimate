@@ -327,6 +327,303 @@ static int unwind(CONTEXT ctx, void **frames, int max) {
     return n;
 }
 
+/* SSBU_CAMERA_HUNT (ultrawide research, temporary): at frame ends, every 10 s, the heap and the
+ * alias area are searched for perspective matrices of the game's 16:9 shape (the y scale 16/9 of
+ * the x scale, no rotation terms, -1 or 1 in w), logged, and their pages made read-only for 2 s:
+ * each game function that writes one is logged once with its callers, then the write goes on
+ * (the page opened for one instruction, single-stepped, and closed again). Which code builds the
+ * camera's projection, so its shape can be widened where the game makes it.
+ * ponytail: page-protection tracer, one thread's write at a time; research only */
+#include <math.h>
+#include "frame_hooks.h"
+#define HUNT_MAX 16
+static struct { u64 at; u8 *page; DWORD old; int armed; } hunt[HUNT_MAX];
+static int nhunt;
+static u64 hunt_until;
+static volatile LONG hunt_logged;
+static __declspec(thread) u8 *hunt_rearm;
+static u64 hunt_seen[64];
+static int nseen;
+
+static volatile LONG64 hunt_wanted[HUNT_MAX];   /* (from the renderer's thread: gpu_d3d11.c cam_hunt_cb) */
+static volatile LONG hunt_nwanted;
+void camera_hunt_watch(u64 guest) {
+    LONG k = InterlockedIncrement(&hunt_nwanted) - 1;
+    if (k < HUNT_MAX) InterlockedExchange64(&hunt_wanted[k], (LONG64)guest);
+}
+
+/* SSBU_CULL_HUNT: view frustums of the game's 16:9 shape. A run of 6 planes (x, y, z, d; 16-byte
+ * aligned) with two pairs of facing sides: the tangent of the left/right pair's half angle 16/9
+ * of the top/bottom pair's, however the camera is turned and whether or not the planes are
+ * normalised. Logged with both angles, and watched like the camera matrices. */
+/* Four side planes, normals n[0..3] (any order): two facing pairs whose bisectors both point
+ * forward (the same direction), each side leaning off it by its pair's half angle, and the
+ * tangents of the half angles 16:9 apart. */
+static int cull_sides(float n[4][3], float *h, float *v) {
+#define DOT(a, b) (n[a][0] * n[b][0] + n[a][1] * n[b][1] + n[a][2] * n[b][2])
+    static const int pairings[3][4] = {{0, 1, 2, 3}, {0, 2, 1, 3}, {0, 3, 1, 2}};
+    for (int p = 0; p < 3; p++) {
+        float t[2], fw[2][3];
+        int ok = 1;
+        for (int q = 0; q < 2 && ok; q++) {
+            int a = pairings[p][2 * q], b = pairings[p][2 * q + 1];
+            float d = DOT(a, b);
+            if (!(d > -0.995f && d < -0.05f)) { ok = 0; break; }
+            float bx = n[a][0] + n[b][0], by = n[a][1] + n[b][1], bz = n[a][2] + n[b][2], bl = sqrtf(bx * bx + by * by + bz * bz);
+            if (bl < 1e-4f) { ok = 0; break; }
+            fw[q][0] = bx / bl; fw[q][1] = by / bl; fw[q][2] = bz / bl;
+            float half = (3.14159265f - acosf(d)) / 2, sh = sinf(half);
+            float da = n[a][0] * fw[q][0] + n[a][1] * fw[q][1] + n[a][2] * fw[q][2];
+            if (fabsf(da - sh) > 2e-3f) { ok = 0; break; }
+            t[q] = tanf(half);
+        }
+        if (!ok) continue;
+        if (fw[0][0] * fw[1][0] + fw[0][1] * fw[1][1] + fw[0][2] * fw[1][2] < 0.9999f) continue;   /* (one forward) */
+        for (int q = 0; q < 2; q++) {
+            float r = t[q] / t[1 - q];
+            if (r > 1.7765f && r < 1.7790f) { *h = atanf(t[q]) * 2 * 57.29578f; *v = atanf(t[1 - q]) * 2 * 57.29578f; return 1; }
+        }
+    }
+#undef DOT
+    return 0;
+}
+static int cull_norm(float n[3], float x, float y, float z) {
+    float l = x * x + y * y + z * z;
+    if (!(l > 1e-8f && l < 1e12f)) return 0;
+    l = 1 / sqrtf(l);
+    n[0] = x * l; n[1] = y * l; n[2] = z * l;
+    return 1;
+}
+/* 4 planes as (x, y, z, d) each, or as x[4], y[4], z[4], d[4]: *layout 0 or 1 */
+static int cull_is_frustum(const float *f, float *h, float *v, int *layout) {
+    float n[4][3];
+    int ok = 1;
+    for (int i = 0; i < 4 && ok; i++) ok = cull_norm(n[i], f[4 * i], f[4 * i + 1], f[4 * i + 2]);
+    if (ok && cull_sides(n, h, v)) { *layout = 0; return 1; }
+    ok = 1;
+    for (int i = 0; i < 4 && ok; i++) ok = cull_norm(n[i], f[i], f[4 + i], f[8 + i]);
+    if (ok && cull_sides(n, h, v)) { *layout = 1; return 1; }
+    return 0;
+}
+static struct { u64 at; float f[6]; } cull_prev[256], cull_now[256];
+static int ncull_prev, ncull_now;
+static void cull_range(u64 from, u64 to, int *found) {
+    for (u64 g = from; g < to;) {
+        MEMORY_BASIC_INFORMATION mi;
+        if (!VirtualQuery(G2H(g), &mi, sizeof mi)) break;
+        u64 end = g + ((u64)(uintptr_t)mi.BaseAddress + mi.RegionSize - (u64)(uintptr_t)G2H(g));
+        if (end > to) end = to;
+        if (mi.State == MEM_COMMIT && (mi.Protect & (PAGE_READWRITE | PAGE_READONLY)) && !(mi.Protect & PAGE_GUARD))
+            for (u64 x = (g + 15) & ~15ull; x + 64 <= end; x += 16) {
+                const float *f = P(float, x);
+                if (f[0] != f[0] || f[4] != f[4] || (f[0] == 0 && f[4] == 0)) continue;   /* (cheap first) */
+                float h, v;
+                int layout;
+                if (!cull_is_frustum(f, &h, &v, &layout)) continue;
+                /* (the fight cameras' heights, from their matrices on the GPU: 30 and 41 degrees) */
+                if (!((v > 29.5f && v < 30.5f) || (v > 40.5f && v < 41.5f))) printf("[cull] (other camera: %.2f x %.2f at %#llx)\n", h, v, (unsigned long long)x);
+                /* (a live camera's planes move: watched only once they changed since the last search) */
+                int moved = 1;
+                for (int k = 0; k < ncull_prev; k++)
+                    if (cull_prev[k].at == x) moved = memcmp(cull_prev[k].f, f, 24) != 0;
+                if (ncull_now < 256) { cull_now[ncull_now].at = x; memcpy(cull_now[ncull_now].f, f, 24); ncull_now++; }
+                if (*found < 60)
+                    printf("[cull] frustum at %#llx (%s): %.2f x %.2f degrees%s | %g %g %g %g | %g %g %g %g\n", (unsigned long long)x, layout ? "x4 y4 z4 d4" : "xyzd x4", h, v,
+                           moved ? " (moved)" : "", f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+                if (moved && nhunt < HUNT_MAX) {
+                    u8 *page = (u8 *)((uintptr_t)G2H(x) & ~(uintptr_t)4095);
+                    int dup = 0;
+                    for (int i = 0; i < nhunt; i++) dup |= hunt[i].page == page;
+                    if (!dup) { hunt[nhunt].at = x; hunt[nhunt].page = page; nhunt++; }
+                }
+                ++*found;
+                x += 48;   /* (past this frustum) */
+            }
+        g = end;
+    }
+}
+
+/* (the game's thread, at frame ends: what to watch for 2 s - the renderer's camera matrices, or the frustums) */
+static void hunt_scan(Cpu *c, const u64 args[8], void *ctx) {
+    (void)c; (void)args; (void)ctx;
+    static u64 last;
+    static int cull = -1;
+    if (cull < 0) cull = getenv("SSBU_CULL_HUNT") != NULL;
+    if (rt_now_ns() - last < (cull ? 10000000000ull : 3000000000ull)) return;
+    last = rt_now_ns();
+    for (int i = 0; i < nhunt; i++)
+        if (hunt[i].armed) { DWORD o; hunt[i].armed = 0; VirtualProtect(hunt[i].page, 4096, hunt[i].old, &o); }
+    nhunt = 0;
+    static int scans;
+    if (cull && scans++ >= 6) return;   /* (six searches a run: each is seconds) */
+    if (cull) {
+        int found = 0;
+        u64 t0 = rt_now_ns();
+        cull_range(0x71052aa000ull, 0x7107448000ull, &found);
+        cull_range(HEAP_BASE, HEAP_BASE + HEAP_LIMIT, &found);
+        cull_range(ALIAS_BASE, ALIAS_BASE + ALIAS_SIZE, &found);
+        memcpy(cull_prev, cull_now, sizeof cull_now);
+        ncull_prev = ncull_now;
+        ncull_now = 0;
+        printf("[cull] %d frustums of 16:9 (%.1f s)\n", found, (rt_now_ns() - t0) / 1e9);
+    } else {
+        LONG n = InterlockedExchange(&hunt_nwanted, 0);
+        if (n > HUNT_MAX) n = HUNT_MAX;
+        for (LONG k = 0; k < n; k++) {
+            u64 g = (u64)hunt_wanted[k];
+            u8 *page = (u8 *)((uintptr_t)G2H(g) & ~(uintptr_t)4095);
+            int dup = 0;
+            for (int i = 0; i < nhunt; i++) dup |= hunt[i].page == page;
+            if (!dup) { hunt[nhunt].at = g; hunt[nhunt].page = page; nhunt++; }
+        }
+    }
+    if (!nhunt) { fflush(stdout); return; }
+    printf("[hunt] watching %d pages for 2 s\n", nhunt);
+    fflush(stdout);
+    hunt_until = rt_now_ns() + 2000000000ull;
+    for (int i = 0; i < nhunt; i++) hunt[i].armed = VirtualProtect(hunt[i].page, 4096, PAGE_READONLY, &hunt[i].old) != 0;
+}
+
+/* SSBU_CAM_DUMP (research): in fights, every 5 s, the fight camera object (main+0x5337ce8 ->
+ * +0x490 -> +0xe0 when +0xd8 is set; f_7103747820 reads it so) from +0x140 to +0x340, as floats. */
+static void cam_dump(Cpu *c, const u64 args[8], void *ctx) {
+    (void)c; (void)args; (void)ctx;
+    static u64 last;
+    if (rt_now_ns() - last < 5000000000ull) return;
+    last = rt_now_ns();
+    u64 a = *P(u64, 0x7105337ce8ull);
+    if (!a) return;
+    a = *P(u64, a + 0x490);
+    if (!a) return;
+    u64 cam = *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
+    printf("[cam] camera %#llx (manager %#llx)\n", (unsigned long long)cam, (unsigned long long)a);
+    for (u32 o = 0x140; o < 0x340; o += 0x20) {
+        const float *f = P(float, cam + o);
+        printf("[cam] +%03x: %g %g %g %g  %g %g %g %g\n", o, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+    }
+    fflush(stdout);
+}
+
+/* SSBU_ASPECT_NATIVE (experiment): the fight camera told the picture's shape, so the game builds a
+ * wide projection itself and culls, frames and checks the screen with it. The camera object (as
+ * cam_dump finds it): +0x164 width, +0x168 height, +0x16c width / height, +0x178 1 / width - the
+ * game's 1920, 1080, 16:9. Written at every frame end, before the next frame's camera update. */
+int aspect_native(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("SSBU_ASPECT_NATIVE") && display_aspect() != 16.0f / 9;
+    return on;
+}
+/* SSBU_ASPECT_HYBRID (test): the renderer squeezes as without NATIVE, the render camera keeps its 16:9
+ * projection (+0x16c), only its width (+0x164) is the picture's; the game camera framing is widened. */
+static int aspect_hybrid(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("SSBU_ASPECT_HYBRID") && display_aspect() != 16.0f / 9;
+    return on;
+}
+static void wide_camera(Cpu *c, const u64 args[8], void *ctx) {
+    (void)c; (void)args; (void)ctx;
+    u64 a = *P(u64, 0x7105337ce8ull);
+    if (!a || !(a = *P(u64, a + 0x490))) return;
+    u64 cam = *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
+    float *f = P(float, cam + 0x164);
+    if (f[1] != 1080.0f) return;   /* (not the camera this was measured on) */
+    float w = 1080.0f * display_aspect();
+    f[0] = w;                                        /* +0x164 */
+    if (aspect_native()) f[2] = display_aspect();    /* +0x16c */
+    if (getenv("SSBU_ASPECT_SCREEN")) {   /* (test: the second 1920 x 1080, +0x170, and its reciprocal +0x178: the screen in pixels?) */
+        f[3] = w;
+        f[5] = 1.0f / w;
+    }
+}
+
+/* SSBU_ASPECT_NATIVE: the HUD's world-to-screen code - P1/CPU tags, magnifying glasses - given the
+ * render camera's projection as 16:9 has it (+0x290, its inverse at +0x2d0: the x scale times the
+ * widening, the inverse's divided), while it runs. The renderer squeezes the HUD into the middle
+ * 16:9, so what it places lands on its fighter again; the 3D and its culling keep the wide one.
+ * The game's own camera framing is left alone: widening it changed the fight (off-screen damage),
+ * where this changes nothing a fight's hash sees.
+ * ponytail: the 12 functions that read the projection in main+0x134..-0x143 (the HUD's, by place);
+ * which of them place the tags is what this run shows */
+static const u64 hud_proj_fns[] = {0x7101341670ull, 0x710134c690ull, 0x710135ccb0ull, 0x71013955d0ull, 0x71013a3f50ull, 0x71013a53d0ull,
+                                   0x71013a67c0ull, 0x71013adb10ull, 0x71013c8460ull, 0x71013ca580ull, 0x71013e29d0ull, 0x710142aed0ull};
+#define NHUD (sizeof hud_proj_fns / sizeof *hud_proj_fns)
+static GuestFn *hud_orig[NHUD];
+static volatile LONG hud_depth;
+static u64 render_camera(void) {
+    u64 a = *P(u64, 0x7105337ce8ull);
+    if (!a || !(a = *P(u64, a + 0x490))) return 0;
+    return *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
+}
+static void hud_call(int k, Cpu *c) {
+    u64 cam = render_camera();
+    float *p = cam ? P(float, cam + 0x290) : NULL, *inv = cam ? P(float, cam + 0x2d0) : NULL;
+    float wide = display_aspect() / (16.0f / 9);
+    int swap = p && *P(float, cam + 0x168) == 1080.0f && InterlockedIncrement(&hud_depth) == 1;   /* (outermost only) */
+    float p0 = 0, i0 = 0;
+    if (swap) { p0 = p[0]; i0 = inv[0]; p[0] = p0 * wide; inv[0] = i0 / wide; }
+    hud_orig[k](c);
+    if (swap) { p[0] = p0; inv[0] = i0; }
+    if (p && *P(float, cam + 0x168) == 1080.0f) InterlockedDecrement(&hud_depth);
+}
+#define HUDW(k) static void hud_w##k(Cpu *c) { hud_call(k, c); }
+HUDW(0) HUDW(1) HUDW(2) HUDW(3) HUDW(4) HUDW(5) HUDW(6) HUDW(7) HUDW(8) HUDW(9) HUDW(10) HUDW(11)
+static GuestFn *const hud_wrappers[NHUD] = {hud_w0, hud_w1, hud_w2, hud_w3, hud_w4, hud_w5, hud_w6, hud_w7, hud_w8, hud_w9, hud_w10, hud_w11};
+static void hook_hud_projection(void) {
+    int n = 0;
+    for (u32 k = 0; k < NHUD; k++) {
+        u64 orig = rt_hook_function(hud_proj_fns[k], rt_native(hud_wrappers[k], "ultrawide HUD projection"));
+        if (orig) { hud_orig[k] = rt_lookup(orig); n++; }
+    }
+    printf("[aspect] the HUD's world-to-screen given 16:9: %d of %d functions\n", n, (int)NHUD);
+}
+
+static LONG CALLBACK hunt_fault(EXCEPTION_POINTERS *e) {
+    DWORD code = e->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_SINGLE_STEP && hunt_rearm) {
+        DWORD o;
+        for (int i = 0; i < nhunt; i++)
+            if (hunt[i].page == hunt_rearm && hunt[i].armed && !VirtualProtect(hunt_rearm, 4096, PAGE_READONLY, &o)) hunt[i].armed = 0;
+        hunt_rearm = NULL;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (code != EXCEPTION_ACCESS_VIOLATION || e->ExceptionRecord->ExceptionInformation[0] != 1) return EXCEPTION_CONTINUE_SEARCH;
+    u8 *a = (u8 *)e->ExceptionRecord->ExceptionInformation[1];
+    for (int i = 0; i < nhunt; i++) {
+        if (!hunt[i].armed || a < hunt[i].page || a >= hunt[i].page + 4096) continue;
+        DWORD o;
+        VirtualProtect(hunt[i].page, 4096, hunt[i].old, &o);
+        u8 *m = (u8 *)G2H(hunt[i].at);
+        if (a >= m && a < m + 96 && hunt_logged < 400) {
+            void *frames[16];
+            int n = unwind(*e->ContextRecord, frames, 16);
+            u64 key = 0;
+            char line[1024];
+            int l = snprintf(line, sizeof line, "[hunt] write to %#llx +%#x:", (unsigned long long)hunt[i].at, (unsigned)(a - m));
+            for (int k = 0, shown = 0; k < n && shown < 8 && l < (int)sizeof line - 64; k++) {
+                char d[64];
+                u64 gfn = guest_of_frame((u64)frames[k], k == 0);
+                if (!gfn) continue;
+                key = key * 1099511628211ull ^ gfn;
+                l += snprintf(line + l, sizeof line - l, " %s", rt_describe(gfn, d, sizeof d));
+                shown++;
+            }
+            int seen = 0;
+            for (int s = 0; s < nseen; s++) seen |= hunt_seen[s] == key;
+            if (!seen && nseen < 64) {
+                hunt_seen[nseen++] = key;
+                InterlockedIncrement(&hunt_logged);
+                printf("%s\n", line);
+                fflush(stdout);
+            }
+        }
+        if (rt_now_ns() > hunt_until) { hunt[i].armed = 0; return EXCEPTION_CONTINUE_EXECUTION; }
+        hunt_rearm = hunt[i].page;
+        e->ContextRecord->EFlags |= 0x100;   /* (one instruction, then the page closes again) */
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 void rt_backtrace_thread(HANDLE thread, int max_frames) {
     void *frames[96];
     char name[96];
@@ -1336,6 +1633,11 @@ static DWORD WINAPI guest_main(LPVOID unused) {
     c->x[1] = 0;
     c->x[2] = rt_native(exception_handler_ready, "exception_handler_ready");
     c->x[3] = rt_native(call_initializers, "call_initializers");
+#ifdef _WIN32
+#endif
+#ifdef _WIN32
+    if (aspect_native()) hook_hud_projection();
+#endif
     phase = "SDK initialisation (nn::init::Start)";
     printf("[boot] nn::init::Start\n");
     fflush(stdout);
@@ -1676,6 +1978,12 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     crash_reporter_start();
     AddVectoredExceptionHandler(1, on_fault);
+    if (aspect_native() || aspect_hybrid()) {
+        frame_hook_add(FRAME_HOOK_END, 300, NULL, wide_camera, NULL);
+        printf("[aspect] native: the fight camera and its framing told %.4g\n", display_aspect());
+    }
+    if (getenv("SSBU_CAM_DUMP")) frame_hook_add(FRAME_HOOK_LINE, 300, NULL, cam_dump, NULL);
+    if (getenv("SSBU_CAMERA_HUNT") || getenv("SSBU_CULL_HUNT")) { AddVectoredExceptionHandler(1, hunt_fault); frame_hook_add(getenv("SSBU_CULL_HUNT") ? FRAME_HOOK_LINE : FRAME_HOOK_END, 300, NULL, hunt_scan, NULL); }   /* (the frustum search in fights only) */
     dump_helper_start();
 #else
     install_signals();

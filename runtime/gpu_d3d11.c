@@ -3461,6 +3461,10 @@ static ID3D11Texture2D *unpack_texture(ID3D11Texture2D *bc, const TextureDesc *d
     return out;
 }
 
+int aspect_native(void);   /* (host.c) */
+static const Shader *pick_vs[64], *pick_ps[64];
+static u64 pick_seen[64];
+static int npick, pick = -1;
 static int draw_reads_wide;   /* (SSBU_ASPECT: the draw being bound samples a widened target) */
 static ID3D11ShaderResourceView *get_texture(const u32 *tic, u32 shader_type, float *scale) {
     TextureDesc d;
@@ -4035,6 +4039,41 @@ static void set_samplers(int stage, u32 count, ID3D11SamplerState *const *v) {
     else ID3D11DeviceContext_PSSetSamplers(ctx, lo, hi - lo, v + lo);
 }
 
+/* SSBU_CAMERA_HUNT (research, temporary): a 3D draw's vertex constant buffers searched for a
+ * camera matrix: rows (or columns) for x and y whose first three entries' lengths differ by 16:9,
+ * true of a projection however the view turns it. Each new one is logged with its guest address,
+ * which host.c's hunt then watches for the game code writing it. */
+static int cam_hunt_draw;
+void camera_hunt_watch(u64 guest);   /* (host.c) */
+static void cam_hunt_cb(const Shader *s, u32 b, u64 va, u32 size) {
+    static float m[1024];
+    static u64 seen[128];
+    static int nseen;
+    if (size > sizeof m) size = sizeof m;
+    read_gpu(va, size, m);
+    for (u32 o = 0; o + 64 <= size; o += 16) {
+        const float *f = m + o / 4;
+        for (int t = 0; t < 2; t++) {
+#define E(r, c) (t ? f[(c) * 4 + (r)] : f[(r) * 4 + (c)])
+            float n0 = sqrtf(E(0, 0) * E(0, 0) + E(0, 1) * E(0, 1) + E(0, 2) * E(0, 2));
+            float n1 = sqrtf(E(1, 0) * E(1, 0) + E(1, 1) * E(1, 1) + E(1, 2) * E(1, 2));
+            float n3 = sqrtf(E(3, 0) * E(3, 0) + E(3, 1) * E(3, 1) + E(3, 2) * E(3, 2));
+            float dot = E(0, 0) * E(1, 0) + E(0, 1) * E(1, 1) + E(0, 2) * E(1, 2);
+#undef E
+            if (!(n0 > 1e-4f && n3 > 1e-4f) || fabsf(n1 / n0 - 16.0f / 9) > 2e-3f || fabsf(dot) > 1e-3f * n0 * n1) continue;
+            u64 key = (u64)b << 56 ^ (u64)o << 40 ^ s->hash;
+            int dup = 0;
+            for (int i = 0; i < nseen; i++) dup |= seen[i] == key;
+            if (dup || nseen >= 128) continue;
+            seen[nseen++] = key;
+            u64 g = gpu_va_to_guest(va) + o;
+            fprintf(stderr, "[hunt] %s cb%u +%#x (%s) guest %#llx: x %g y %g w %g\n", s->name, b, o, t ? "columns" : "rows",
+                    (unsigned long long)g, n0, n1, n3);
+            camera_hunt_watch(g);
+        }
+    }
+}
+
 /* Bind a stage's constant buffers and textures. */
 static void bind_resources(const u32 *regs, const CbBinding cb[STAGES][18], int stage, const Shader *s, DrawParams *params) {
     int mstage = stage == SHADER_VERTEX ? STAGE_VERTEX : STAGE_FRAGMENT;
@@ -4046,6 +4085,7 @@ static void bind_resources(const u32 *regs, const CbBinding cb[STAGES][18], int 
         u32 size = cb[mstage][b].size;
         if (size > 0x10000) size = 0x10000;
         if (size > s->info.cbuf_extent[b]) size = s->info.cbuf_extent[b];   /* only what the program can read */
+        if (cam_hunt_draw && stage == SHADER_VERTEX && cb[mstage][b].address && size >= 64) cam_hunt_cb(s, b, cb[mstage][b].address, size);
         if (size >= 0x1000 && cb[mstage][b].address && !draw_logging && (srv[b] = kept_cb(cb[mstage][b].address, size)))
             continue;   /* big ones stay on the GPU */
         if (size > gfx_stat_biggest_cb.size) {   /* (for the statistics: the largest one lately) */
@@ -4064,7 +4104,7 @@ static void bind_resources(const u32 *regs, const CbBinding cb[STAGES][18], int 
                     stage == SHADER_VERTEX ? "vs" : "ps", b, cb[mstage][b].address, cb[mstage][b].size,
                     gpu_va_to_guest(cb[mstage][b].address), f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
             const char *more = getenv("SSBU_GFX_LOG_CB");   /* this bank in full (first 64 words) */
-            if (more && strtoul(more, NULL, 0) == b) {
+            if (more && (!strcmp(more, "all") || strtoul(more, NULL, 0) == b)) {   /* ("all": every bank) */
                 u32 before[64];
                 read_gpu(cb[mstage][b].address - 0x100, 0x100, before);
                 for (u32 i = 0; i < 64; i += 8)
@@ -4525,8 +4565,17 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     params.base[1] = regs[M_GLOBAL_BASE_INSTANCE] + instance_counter;
 
     draw_reads_wide = 0;
+    if (ps) bind_resources(regs, cb, SHADER_PIXEL, ps, &params);   /* (first: whether it reads the scene decides the vertex stage's) */
+    int depth_on = (regs[M_DEPTH_TEST] & 1) && dsv;
+    {   /* (SSBU_CAMERA_HUNT: 3D draws on a widened target, 300 of them every 10 s) */
+        static int hunting = -1, budget;
+        static u64 next;
+        if (hunting < 0) hunting = getenv("SSBU_CAMERA_HUNT") != NULL;
+        if (hunting && rt_now_ns() > next) { budget = 300; next = rt_now_ns() + 10000000000ull; }
+        cam_hunt_draw = hunting && budget > 0 && rt_wide > 1.0f && dd.DepthEnable && dd.DepthFunc != D3D11_COMPARISON_ALWAYS;
+        if (cam_hunt_draw) budget--;
+    }
     bind_resources(regs, cb, SHADER_VERTEX, vs, &params);
-    if (ps) bind_resources(regs, cb, SHADER_PIXEL, ps, &params);
     /* SSBU_ASPECT: on a widened target every draw is squeezed back to the game's 16:9 shape (x times
      * 16:9 over the aspect: 3D then keeps its proportions and shows more at the sides; the HUD sits in
      * the middle 16:9, over the fighters its tags follow), except a full-screen pass, which must
@@ -4534,16 +4583,28 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
      * bloom, the lighting passes). 3D effects that read the scene (soft particles) test depth.
      * ponytail: per-draw heuristic, no shader change (a new vertex shader costs every player ~1 h
      * of compiling); a fade without a texture is squeezed too - check one if bars show */
-    int depth_on = (regs[M_DEPTH_TEST] & 1) && dsv;
     /* (a full-screen pass may test depth with ALWAYS to write it: the half-size depth copy the
      * smoke and other effects are tested against) */
     int depth_tests = depth_on && dd.DepthFunc != D3D11_COMPARISON_ALWAYS;
-    if (rt_wide > 1.0f && !(draw_reads_wide && !depth_tests)) {
+    /* (SSBU_ASPECT_NATIVE: the game draws 3D wide itself; only 2D that is not a full-screen pass is squeezed) */
+    int squeeze = aspect_native() ? !depth_on && !draw_reads_wide : !(draw_reads_wide && !depth_tests);
+    /* (research, SSBU_ASPECT_NATIVE: F9 steps through the kinds of squeezed 2D draw - vertex and pixel
+     * program - drawn in the last second, leaving one unsqueezed: which kind the P1/CPU tags are) */
+    if (rt_wide > 1.0f && squeeze && !depth_on && aspect_native()) {
+        int k = 0;
+        while (k < npick && !(pick_vs[k] == vs && pick_ps[k] == ps)) k++;
+        if (k == npick && npick < 64) { pick_vs[k] = vs; pick_ps[k] = ps; npick++; }
+        if (k < 64) pick_seen[k] = gfx_stat_presented;
+        if (k == pick) squeeze = 0;
+    }
+    if (rt_wide > 1.0f && squeeze) {
         params.fix[0] /= rt_wide;
         /* A 2D draw (no depth test: the HUD, menus) stays inside the middle 16:9: the game parks
          * hidden panels just off its screen, which the squeeze would bring into view. Its scissor
          * (in the game's pixels) is squeezed towards the middle with it. 3D keeps the full width. */
-        if (!depth_on) {
+        static int clamp = -1;
+        if (clamp < 0) clamp = !getenv("SSBU_NO_2D_CLAMP");
+        if (!depth_on && clamp) {
             float l = 0, r = (float)rt_w, cx = (float)rt_w / 2;
             if (regs[M_SCISSOR(0)] & 1) { u32 sh = regs[M_SCISSOR(0) + 1]; l = (float)(sh & 0xFFFF); r = (float)(sh >> 16); }
             if (l < 0) l = 0;
@@ -5578,6 +5639,14 @@ void d3d11_present(u64 guest, u32 width, u32 height) {
     if (profile_at == -1) profile_at = getenv("SSBU_PROFILE_AT") ? atof(getenv("SSBU_PROFILE_AT")) : -2;
     if (profile_at >= 0 && rt_now_ns() > (u64)(profile_at * 1e9)) { profile_at = -2; keys |= 32; }
     if (keys & 32) profile_start(10.0);   /* F6 */
+    if (keys & 256) {   /* F9: the next kind of 2D draw left unsqueezed (above) */
+        int k = pick;
+        do k = k + 1 >= npick ? -1 : k + 1;
+        while (k >= 0 && gfx_stat_presented - pick_seen[k] > 60);
+        pick = k;
+        if (k < 0) fprintf(stderr, "[aspect] F9: every 2D draw squeezed\n");
+        else fprintf(stderr, "[aspect] F9: not squeezed: %s %s\n", pick_vs[k]->name, pick_ps[k] ? pick_ps[k]->name : "(no ps)");
+    }
     static char detail[1800], hint[640];
     static u64 last_ns, last_presented, last_drawn, last_dispatched, last_skipped, last_watch, last_busy, last_upload, last_waits, last_composed, last_reused, last_kind[4];
     u64 now = rt_now_ns();
