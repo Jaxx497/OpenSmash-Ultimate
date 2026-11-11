@@ -4614,6 +4614,43 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
             sr.right = (LONG)ceilf((cx + (r - cx) / rt_wide) * rt_sx);
             if (memcmp(&cur.scissor, &sr, sizeof sr)) { ID3D11DeviceContext_RSSetScissorRects(ctx, 1, &sr); cur.scissor = sr; }
         }
+        /* A magnifying bubble at a side of the 16:9 view is moved out to the same side of the picture,
+         * as far from its edge as it was from the 16:9 one (docs/ULTRAWIDE-CONTEXT.md). Known by its
+         * portrait - a program of its own, the fighter's picture - and the two draws right after it
+         * at the same place (ring, arrow). The element's x, in the HUD's pixels from the middle, is
+         * in its vertex bank 3 at +0x4c, or +0x5c (the ring). When the bubble shows stays the game's. */
+        static int bubble_left;
+        static float bubble_t;
+        if (!depth_on && aspect_native() && cb[STAGE_VERTEX][3].address && cb[STAGE_VERTEX][3].size >= 0x60) {
+            float row[8];
+            read_gpu(cb[STAGE_VERTEX][3].address + 0x40, sizeof row, row);
+            int portrait = vs && !strncmp(vs->name, "vs_545fbedf170d65dd", 19);
+            if (portrait) {
+                bubble_left = 0;
+                float x = row[3], w = rt_wide;
+                if (fabsf(x) > 960 * 0.55f && fabsf(x) < 1200) {
+                    float sgn = x < 0 ? -1.0f : 1.0f, target = sgn * (1 - (960 - fabsf(x)) / (960 * w));
+                    bubble_t = target - x / (960 * w);
+                    bubble_left = 3;
+                    static float bubble_x;
+                    bubble_x = x;
+                    (void)bubble_x;
+                }
+            }
+            if (bubble_left > 0) {
+                static float anchor;
+                if (portrait) anchor = row[3];
+                if (portrait || fabsf(row[3] - anchor) < 120 || fabsf(row[7] - anchor) < 120) {
+                    bubble_left--;
+                    D3D11_VIEWPORT bv = cur.vp;
+                    bv.TopLeftX += bubble_t * bv.Width / 2;
+                    ID3D11DeviceContext_RSSetViewports(ctx, 1, &bv);
+                    cur.vp = bv;
+                    D3D11_RECT all = {0, 0, 16384, 16384};
+                    if (memcmp(&cur.scissor, &all, sizeof all)) { ID3D11DeviceContext_RSSetScissorRects(ctx, 1, &all); cur.scissor = all; }
+                } else bubble_left = 0;
+            }
+        }
     }
     if (draw_logging && rt_wide > 1.0f) fprintf(stderr, "[draw]   aspect: x %g (reads wide %d, depth %d)\n", params.fix[0], draw_reads_wide, (int)((regs[M_DEPTH_TEST] & 1) && dsv));
 

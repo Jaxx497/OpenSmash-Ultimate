@@ -251,7 +251,13 @@ with the game camera widened: first difference frame 578, damage. A stage not na
    range: Town and City 0, Bridge of Eldin at most 7 (the game's own 16:9 view). The shadow camera
    (the game's framing replayed on a copy) is kept as `SSBU_WIDE_STYLE=shadow` for research. Waiting for
    the owner's feel test (`build\aspect_test\stage.bat`).
-2. **Magnifying glass at the wide edge**: the game clamps the bubble to its 16:9 screen, and the HUD is
+2. ~~**Magnifying bubble at the picture's edge**~~ done (2026-11-11): the renderer knows a bubble by its
+   portrait (`vs_545fbedf170d65dd`, the fighter's picture from a 128x128 target) and the two draws right
+   after it at the same x (ring `vs_38e6664f…`, arrow `vs_1669b7d1…`; x in vertex bank 3 at +0x4c, the
+   ring's at +0x5c, in HUD pixels from the middle), and shifts the three by the viewport to the same side
+   of the picture, as far from its edge as from the 16:9 one, past the 2D clip box. Left: the faint
+   triple arrows (▶▶▶) that point to an off-screen fighter stay at the 16:9 edge.
+   Was: **Magnifying glass at the wide edge**: the game clamps the bubble to its 16:9 screen, and the HUD is
    squeezed into the middle 16:9, so the bubble sits on the old 16:9 edge. Clamp it to the picture's
    edge instead and let its draws through the 2D clip box. When it shows stays the 16:9 rule's (a
    useful cue near the blast zone).

@@ -530,6 +530,13 @@ static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
         printf("[camwide] F %lld | offset %.2f %.2f %.2f k %.4f view %.1f %.1f\n", f, wide_now_x, wide_now_y, wide_now_z, wide_style_stage() ? stage_out_k : shadow_k_out,
                stage_out_l, stage_out_r);
     }
+    {
+        extern volatile long hud_calls[12];
+        char line[200];
+        int n = snprintf(line, sizeof line, "[hudcalls] F %lld |", f);
+        for (int k = 0; k < 12; k++) n += snprintf(line + n, sizeof line - n, " %ld", InterlockedExchange(&hud_calls[k], 0));
+        printf("%s\n", line);
+    }
     if (getenv("SSBU_CAM_TRACE_OBJ"))   /* (the render camera's start: its inputs) */
         for (u32 o = 0; o < 0x140; o += 0x20) {
             const float *v = P(float, cam + o);
@@ -881,7 +888,9 @@ static u64 render_camera(void) {
     if (!a || !(a = *P(u64, a + 0x490))) return 0;
     return *P(u64, a + 0xd8) ? *P(u64, a + 0xe0) : 0x7105334060ull;
 }
+volatile long hud_calls[12];   /* (SSBU_CAM_TRACE: calls of each HUD world-to-screen function) */
 static void hud_call(int k, Cpu *c) {
+    InterlockedIncrement(&hud_calls[k]);
     u64 cam = render_camera();
     int wide_here = 0;   /* (SSBU_WIDE_FRAMING: the HUD places things where the picture shows them) */
     if (cam && copy_orig && !wide_applied.on && in_fight() && (wide_now[0] != 0 || wide_now[1] != 0 || wide_now[2] != 0 || shadow_k != 1)) {
