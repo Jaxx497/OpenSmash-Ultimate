@@ -4618,10 +4618,12 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
          * as far from its edge as it was from the 16:9 one (docs/ULTRAWIDE-CONTEXT.md). Known by its
          * portrait - a program of its own, the fighter's picture - and the two draws right after it
          * at the same place (ring, arrow). The element's x, in the HUD's pixels from the middle, is
-         * in its vertex bank 3 at +0x4c, or +0x5c (the ring). When the bubble shows stays the game's. */
+         * in its vertex bank 3 at +0x4c, or +0x5c (the ring). When the bubble shows stays the game's.
+         * Not in the wide view: there the fighter is still in the picture past the 16:9 edge, and a
+         * bubble at the picture's edge looks like the fighter jumped there (owner, 2026-11-11). */
         static int bubble_left;
         static float bubble_t;
-        if (!depth_on && aspect_native() && cb[STAGE_VERTEX][3].address && cb[STAGE_VERTEX][3].size >= 0x60) {
+        if (!depth_on && aspect_native() && display_view() != VIEW_WIDE && cb[STAGE_VERTEX][3].address && cb[STAGE_VERTEX][3].size >= 0x60) {
             float row[8];
             read_gpu(cb[STAGE_VERTEX][3].address + 0x40, sizeof row, row);
             int portrait = vs && !strncmp(vs->name, "vs_545fbedf170d65dd", 19);

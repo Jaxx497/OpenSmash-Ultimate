@@ -717,7 +717,11 @@ static void wide_copy(Cpu *c) {
     if (!cam || dst != cam + 0x1d0 || !in_fight()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; return; }
     static float ease = -1;
     if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
+    static int cycle = -1;   /* SSBU_VIEW_CYCLE=<n> (test): the next view every n fight frames, as the menu would */
+    if (cycle < 0) { const char *e = getenv("SSBU_VIEW_CYCLE"); cycle = e ? atoi(e) : 0; }
+    if (cycle > 0) { long long f = fight_test_frame0(); if (f > 0) display_set_view((int)(f / cycle % 3)); }
     if (wide_style_stage()) stage_fit(dst);   /* (sets wide_goal_offset and shadow_k) */
+    else if (!wide_style_shadow()) shadow_k = 1;   /* (the wide view: no zoom) */
     for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() || wide_style_shadow() ? 1.0f : ease);
     wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
@@ -764,6 +768,7 @@ static void replay_call(const CallRec *r, Cpu *base_c, u64 base, u64 blk, u64 x3
 static u64 shadow_cam;
 static int shadow_ready;
 static void shadow_update(Cpu *c) {
+    if (!wide_style_shadow()) { shadow_ready = 0; upd_orig(c); return; }   /* (another view now: the next zoomed one starts afresh) */
     u64 cam = c->x[0];
     rec_cam = cam;
     rec_frame.valid = rec_move.valid = 0;
@@ -810,15 +815,17 @@ static void shadow_update(Cpu *c) {
     if (d[0] == d[0] && d[1] == d[1] && d[2] == d[2] && fabsf(d[0]) < 2000 && fabsf(d[1]) < 2000 && fabsf(d[2]) < 2000)
         memcpy((void *)wide_goal_offset, d, sizeof d);
 }
-static int wide_style_shadow(void) {   /* (research: the shadow camera above) */
-    static int on = -1;
-    if (on < 0) on = display_view() == VIEW_ZOOMED;
-    return on;
-}
-static int wide_style_stage(void) {
-    static int on = -1;
-    if (on < 0) on = display_view() == VIEW_HYBRID;
-    return on;
+/* (the view as set now: the settings menu changes it during a fight) */
+static int wide_style_shadow(void) { return display_view() == VIEW_ZOOMED; }
+static int wide_style_stage(void) { return display_view() == VIEW_HYBRID; }
+/* The game's framing (f_71004fe4f0), one hook for every view: recorded for the zoomed view's shadow
+ * camera, run again for the picture's shape for the wide view, left alone for the hybrid view. */
+static void framing_hook(Cpu *c) {
+    static int dump = -1;
+    if (dump < 0) dump = getenv("SSBU_FRAMING_DUMP") != NULL;
+    if (rec_cam) rec_call(&rec_frame, c, frame_fn_orig);
+    else if (dump || display_view() == VIEW_WIDE) framing_dump(c);
+    else frame_fn_orig(c);
 }
 
 static GuestFn *prep_orig;
@@ -907,6 +914,12 @@ static void hud_call(int k, Cpu *c) {
         memcpy(view_t, P(float, cam) + 12, 12);
         memcpy(P(float, cam) + 12, P(float, cam + 0x1d0) + 12, 12);
         view_here = 1;
+    } else if (cam && wide_applied.on && wide_applied.block == cam + 0x1d0) {
+        static int told;
+        if (!told++) {
+            const float *a = P(float, cam), *b = P(float, cam + 0x1d0);
+            printf("[aspect] HUD view: the camera's +0x0 is not the block's view, left alone: %g %g %g / %g %g %g\n", a[0], a[1], a[2], b[0], b[1], b[2]);
+        }
     }
     float *p = cam ? P(float, cam + 0x290) : NULL, *inv = cam ? P(float, cam + 0x2d0) : NULL;
     float wide = display_aspect() / (16.0f / 9);
@@ -1991,16 +2004,16 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
-    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (view_on() && !wide_style_stage() && !wide_style_shadow())) hook_framing_dump();
-    if (view_on() && wide_style_shadow()) {
+    if (!view_on() && (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE"))) hook_framing_dump();
+    if (view_on()) {   /* (every view's hooks: the view can change during a fight) */
         u64 orig = rt_hook_function(0x71004fdc10ull, rt_native(shadow_update, "ultrawide shadow camera"));
         if (orig) upd_orig = rt_lookup(orig);
-        u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(rec_frame_call, "ultrawide framing recorder"));
+        u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(framing_hook, "ultrawide framing"));
         u64 f2 = rt_hook_function(0x71004fec80ull, rt_native(rec_move_call, "ultrawide move recorder"));
-        if (f1) frame_fn_orig = rt_lookup(f1);
+        if (f1) frame_fn_orig = fdump_orig = rt_lookup(f1);
         if (f2) move_fn_orig = rt_lookup(f2);
         if (!f1 || !f2) orig = 0;
-        printf("[aspect] camera style stage (shadow camera): %s (main+0x4fdc10)\n", orig ? "on" : "NOT hooked");
+        printf("[aspect] the views' game camera hooks: %s (main+0x4fdc10)\n", orig ? "on" : "NOT hooked");
     }
     if (view_on()) {
         u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));

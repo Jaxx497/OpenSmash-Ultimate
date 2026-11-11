@@ -915,11 +915,11 @@ static void build(void)
                 "the fight itself stays what 16:9 has, online too. The HUD stays in the middle.");
         snprintf(r->value, sizeof r->value, "%s", display_aspect_setting());
         note_env(r, "SSBU_ASPECT");
-        r = add(R_VIEW, K_CHOICE, W_RESTART, "View (wider pictures)",
+        r = add(R_VIEW, K_CHOICE, W_NOW, "View (wider pictures)",
                 "wide: the 16:9 view with the sides added (it can show past the stage). zoomed: the fight framed for the wider picture, "
                 "closer and kept on the stage. hybrid: wide, zoomed in just enough to keep the picture on the stage.");
         {
-            int v = display_view_setting();
+            int v = display_view();
             snprintf(r->value, sizeof r->value, "%s", v == VIEW_WIDE ? "wide" : v == VIEW_ZOOMED ? "zoomed" : "hybrid");
         }
         note_env(r, "SSBU_VIEW");
@@ -1386,7 +1386,7 @@ static void change(const Row *row, int dir)
     case R_VIEW:
     {
         static const char *const VIEWS[] = {"wide", "zoomed", "hybrid"};
-        int i = cycle(display_view_setting(), 3, dir);
+        int i = cycle(display_view(), 3, dir);
         set_display("view", VIEWS[i]);
         display_set_view(i);
         break;

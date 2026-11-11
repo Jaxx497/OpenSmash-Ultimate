@@ -34,9 +34,9 @@ float display_aspect(void);
 /* The view (docs/ULTRAWIDE-CONTEXT.md): display.ini view, SSBU_VIEW over it. */
 enum { VIEW_WIDE, VIEW_ZOOMED, VIEW_HYBRID };
 int display_view(void);
-/* (the settings menu) the settings as saved, and changes it saves: taken at the next start */
+/* (the settings menu) the picture shape as saved, and a change to it: taken at the next start
+ * (the game's render targets are made at its size); a view change is taken at once. */
 const char *display_aspect_setting(void);
-int display_view_setting(void);
 void display_set_aspect(const char *text);
 void display_set_view(int view);
 /* The picture (display_aspect's shape) centred in a w x h back buffer. */

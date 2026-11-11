@@ -63,8 +63,7 @@ static struct {
 } cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID};
 
 static int cfg_runahead;   /* display.ini's runahead (display_runahead) */
-static char saved_aspect[16];   /* (the settings menu's choices: shown now, taken at the next start) */
-static int saved_view = -1;
+static char saved_aspect[16];   /* (the settings menu's picture shape: shown now, taken at the next start) */
 
 static const char DEFAULT_INI[] =
     "; display.ini: the game's window and the pacing of its frames. Read when the game starts; the\n"
@@ -344,9 +343,8 @@ float display_aspect(void) {
 }
 int display_view(void) { load(); return cfg.view; }
 const char *display_aspect_setting(void) { load(); return saved_aspect[0] ? saved_aspect : cfg.aspect; }
-int display_view_setting(void) { load(); return saved_view >= 0 ? saved_view : cfg.view; }
 void display_set_aspect(const char *text) { snprintf(saved_aspect, sizeof saved_aspect, "%s", text); }
-void display_set_view(int view) { saved_view = view; }
+void display_set_view(int view) { load(); cfg.view = view; }   /* (at once: the views read it every frame) */
 
 /* (the settings menu) the render scale it saved: shown from now on, the renderer's own counts
  * only at the next start */
