@@ -160,8 +160,10 @@ visual-only framing zooms out as 16:9 does: 259 past. So the zoom is not decided
 
 The camera update (`f_71004fdc10`) then calls `f_71004fec80` twice: with s0 = the stored aspect
 (+0x134), x2 = +0x70 (the camera's now), x3 = +0x110; and with s0 = main+0x4472c5c (16:9), x2 = +0xc0,
-x3 = +0x118. These move the camera's state; the zoom is likely there. Setting the stored aspect even
-only during the second `f_71004fe4f0` call changed the fight (frame 2474): it is read by logic.
+x3 = +0x118. These move the camera's state; the zoom is likely there. Setting the stored aspect only during the
+second `f_71004fe4f0` call did not change the picture; the hash difference seen then (frame 2474) was
+the results screen's random victory pose, not the fight. Compare hash logs up to the "GAME!" frame (the
+fighters jump to x 1100 / 0 for the results).
 
 ### Decisions (owner, 2026-11-11)
 

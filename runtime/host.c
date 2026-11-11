@@ -525,7 +525,8 @@ static void cam_trace(Cpu *c, const u64 args[8], void *ctx) {
            vc[0], vc[1], *P(float, m + 0xf38) * *P(float, m + 0xf68), *P(float, m + 0xf58));
     {   /* (SSBU_WIDE_FRAMING: the offset the picture's camera has from the game's, and its goal) */
         extern float wide_now_x, wide_now_y, wide_now_z;
-        printf("[camwide] F %lld | offset %.2f %.2f %.2f\n", f, wide_now_x, wide_now_y, wide_now_z);
+        extern volatile float shadow_k_out;
+        printf("[camwide] F %lld | offset %.2f %.2f %.2f k %.4f\n", f, wide_now_x, wide_now_y, wide_now_z, shadow_k_out);
     }
     if (getenv("SSBU_CAM_TRACE_OBJ"))   /* (the render camera's start: its inputs) */
         for (u32 o = 0; o < 0x140; o += 0x20) {
@@ -624,6 +625,7 @@ static void framing_dump(Cpu *c) {
  * src x1 = its own); after that copy, that block is moved by the wide offset, eased like a camera:
  * position (inverse view, +0xb0 of the block), look-at (+0x100) and the view's translation (+0x30,
  * minus the offset turned by the view). The game's camera is not touched: the fight is the same. */
+static int wide_style_stage(void);   /* (below) */
 static GuestFn *copy_orig;
 static float wide_now[3];
 float wide_now_x, wide_now_y, wide_now_z;   /* (a copy for SSBU_CAM_TRACE) */
@@ -636,15 +638,25 @@ static int in_fight(void) { return fight_line_at && rt_now_ns() - fight_line_at 
  * scene set-up, f_7103747820, returns): game logic may ask where things are on screen (scripts have
  * sv_camera_manager::world_to_screen), and a moved camera changed a fighter's end-of-game pose. */
 static struct { u64 block; float t[3], eye[3], at[3]; int on; } wide_applied;
+static volatile float shadow_k = 1;
+volatile float shadow_k_out = 1;   /* (for SSBU_CAM_TRACE) */   /* (stage style: the shadow's distance over the game's; d is then the look-at's shift) */
 static void wide_apply(u64 block, const float d[3]) {
     float *v = P(float, block), *eye = P(float, block + 0xb0), *at = P(float, block + 0x100);
     wide_applied.block = block;
     memcpy(wide_applied.t, v + 12, 12); memcpy(wide_applied.eye, eye, 12); memcpy(wide_applied.at, at, 12);
-    for (int j = 0; j < 3; j++) {
-        v[12 + j] -= d[0] * v[j] + d[1] * v[4 + j] + d[2] * v[8 + j];   /* (row-vector view: t' = t - d R) */
-        eye[j] += d[j];
-        at[j] += d[j];
-    }
+    if (wide_style_stage()) {
+        float k = shadow_k;
+        for (int j = 0; j < 3; j++) {
+            eye[j] = at[j] + (eye[j] - at[j]) * k + d[j];
+            at[j] += d[j];
+        }
+        for (int j = 0; j < 3; j++) v[12 + j] = -(eye[0] * v[j] + eye[1] * v[4 + j] + eye[2] * v[8 + j]);   /* (row-vector view: t = -eye R) */
+    } else
+        for (int j = 0; j < 3; j++) {
+            v[12 + j] -= d[0] * v[j] + d[1] * v[4 + j] + d[2] * v[8 + j];   /* (row-vector view: t' = t - d R) */
+            eye[j] += d[j];
+            at[j] += d[j];
+        }
     wide_applied.on = 1;
 }
 static void wide_restore(void) {
@@ -660,11 +672,104 @@ static void wide_copy(Cpu *c) {
     if (!cam || dst != cam + 0x1d0 || !in_fight()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; return; }
     static float ease = -1;
     if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
-    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * ease;
+    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() ? 1.0f : ease);
     wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
     wide_apply(dst, wide_now);
 }
+/* SSBU_WIDE_STYLE=stage (with SSBU_WIDE_FRAMING): a shadow camera. The game camera's update
+ * (f_71004fdc10, x0 the camera) frames with f_71004fe4f0 (goal into the block at +0x70: look now +0x0,
+ * goal +0x10, position now +0x20, goal +0x30) and moves it with f_71004fec80 (x3 = +0x110). Right after
+ * it, both run again with the picture's aspect on a block of this file's own (kept from frame to frame,
+ * so the game's easing, zoom limits and stage clamping act on it as on the real one); only the picture
+ * follows it (wide_copy). The one write outside the block (camera manager +0xc80) is put back. */
+static GuestFn *upd_orig;
+static u8 shadow_block[0xa0], shadow_x3[8];
+/* The two calls as the game made them this frame (every register, and x1's buffer, which the caller
+ * fills), for the block at camera + 0x70: replayed on the shadow with only the block and the aspect
+ * changed. */
+typedef struct { Cpu c; u8 x1buf[0x80]; int valid; } CallRec;
+static CallRec rec_frame, rec_move;
+static GuestFn *frame_fn_orig, *move_fn_orig;
+static u64 rec_cam;
+static void rec_call(CallRec *r, Cpu *c, GuestFn *orig) {
+    if (rec_cam && c->x[0] == rec_cam && c->x[2] == rec_cam + 0x70) {
+        r->c = *c;
+        memcpy(r->x1buf, G2H(c->x[1]), sizeof r->x1buf);
+        r->valid = 1;
+    }
+    orig(c);
+}
+static void rec_frame_call(Cpu *c) { rec_call(&rec_frame, c, frame_fn_orig); }
+static void rec_move_call(Cpu *c) { rec_call(&rec_move, c, move_fn_orig); }
+static void replay_call(const CallRec *r, Cpu *base_c, u64 base, u64 blk, u64 x3, GuestFn *fn) {
+    Cpu s = r->c;
+    u64 out = base + 0x100;
+    memcpy(G2H(out), r->x1buf, sizeof r->x1buf);
+    s.x[1] = out;
+    s.x[2] = blk;
+    if (fn == move_fn_orig) s.x[3] = x3;
+    s.v[0].f[0] = display_aspect();
+    s.sp = base - 0x10;
+    s.x[30] = 0;
+    (void)base_c;
+    fn(&s);
+}
+static u64 shadow_cam;
+static int shadow_ready;
+static void shadow_update(Cpu *c) {
+    u64 cam = c->x[0];
+    rec_cam = cam;
+    rec_frame.valid = rec_move.valid = 0;
+    upd_orig(c);
+    rec_cam = 0;
+    if (!in_fight() || !rec_frame.valid || !rec_move.valid) { if (!in_fight()) shadow_ready = 0; return; }
+    if (!shadow_ready || cam != shadow_cam) {   /* (a new fight: start from the game's camera) */
+        memcpy(shadow_block, G2H(cam + 0x70), sizeof shadow_block);
+        memcpy(shadow_x3, G2H(cam + 0x110), sizeof shadow_x3);
+        shadow_cam = cam;
+        shadow_ready = 1;
+    }
+    u64 base = (c->sp - 0x800) & ~0xFull, blk = base, x3 = base + 0xc0, out = base + 0x100;
+    u64 m = *P(u64, 0x71052b8f00ull);
+    m = m ? *P(u64, m) : 0;
+    float keep_c80 = m ? *P(float, m + 0xc80) : 0;
+    memcpy(G2H(blk), shadow_block, sizeof shadow_block);
+    memcpy(G2H(x3), shadow_x3, sizeof shadow_x3);
+    (void)out;
+    replay_call(&rec_frame, c, base, blk, x3, frame_fn_orig);
+    replay_call(&rec_move, c, base, blk, x3, move_fn_orig);
+    memcpy(shadow_block, G2H(blk), sizeof shadow_block);
+    memcpy(shadow_x3, G2H(x3), sizeof shadow_x3);
+    if (m) *P(float, m + 0xc80) = keep_c80;
+    {   /* (SSBU_SHADOW_LOG: both blocks every 30 fight frames) */
+        static int log = -1; static long long last = -1;
+        if (log < 0) log = getenv("SSBU_SHADOW_LOG") != NULL;
+        long long f = fight_test_frame0();
+        if (log && f != last && f % 30 == 0) {
+            last = f;
+            const float *g = P(float, cam + 0x70), *h = (const float *)shadow_block;
+            printf("[shadow] F %lld game look %.1f %.1f %.1f goal %.1f %.1f %.1f pos %.1f %.1f %.1f goal %.1f %.1f %.1f | shadow look %.1f %.1f %.1f goal %.1f %.1f %.1f pos %.1f %.1f %.1f goal %.1f %.1f %.1f\n",
+                   f, g[0], g[1], g[2], g[4], g[5], g[6], g[8], g[9], g[10], g[12], g[13], g[14], h[0], h[1], h[2], h[4], h[5], h[6], h[8], h[9], h[10], h[12], h[13], h[14]);
+        }
+    }
+    /* the picture's change: the shadow's look-at minus the game's, and its distance over the game's */
+    const float *sl = (const float *)shadow_block, *gl = P(float, cam + 0x70);
+    const float *sp = (const float *)(shadow_block + 0x20), *gp = P(float, cam + 0x90);
+    float d[3] = {sl[0] - gl[0], sl[1] - gl[1], sl[2] - gl[2]};
+    float ds = sqrtf((sp[0] - sl[0]) * (sp[0] - sl[0]) + (sp[1] - sl[1]) * (sp[1] - sl[1]) + (sp[2] - sl[2]) * (sp[2] - sl[2]));
+    float dg = sqrtf((gp[0] - gl[0]) * (gp[0] - gl[0]) + (gp[1] - gl[1]) * (gp[1] - gl[1]) + (gp[2] - gl[2]) * (gp[2] - gl[2]));
+    if (dg > 1e-3f && ds == ds && ds / dg > 0.05f && ds / dg < 20) shadow_k = ds / dg;
+    shadow_k_out = wide_style_stage() ? shadow_k : 1;
+    if (d[0] == d[0] && d[1] == d[1] && d[2] == d[2] && fabsf(d[0]) < 2000 && fabsf(d[1]) < 2000 && fabsf(d[2]) < 2000)
+        memcpy((void *)wide_goal_offset, d, sizeof d);
+}
+static int wide_style_stage(void) {
+    static int on = -1;
+    if (on < 0) { const char *v = getenv("SSBU_WIDE_STYLE"); on = v && !_stricmp(v, "stage"); }
+    return on;
+}
+
 static GuestFn *prep_orig;
 static void wide_prep(Cpu *c) { prep_orig(c); wide_restore(); }
 
@@ -1814,7 +1919,17 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #endif
 #ifdef _WIN32
     if (aspect_native()) hook_hud_projection();
-    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING"))) hook_framing_dump();
+    if (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE") || (aspect_native() && getenv("SSBU_WIDE_FRAMING") && !wide_style_stage())) hook_framing_dump();
+    if (aspect_native() && getenv("SSBU_WIDE_FRAMING") && wide_style_stage()) {
+        u64 orig = rt_hook_function(0x71004fdc10ull, rt_native(shadow_update, "ultrawide shadow camera"));
+        if (orig) upd_orig = rt_lookup(orig);
+        u64 f1 = rt_hook_function(0x71004fe4f0ull, rt_native(rec_frame_call, "ultrawide framing recorder"));
+        u64 f2 = rt_hook_function(0x71004fec80ull, rt_native(rec_move_call, "ultrawide move recorder"));
+        if (f1) frame_fn_orig = rt_lookup(f1);
+        if (f2) move_fn_orig = rt_lookup(f2);
+        if (!f1 || !f2) orig = 0;
+        printf("[aspect] camera style stage (shadow camera): %s (main+0x4fdc10)\n", orig ? "on" : "NOT hooked");
+    }
     if (aspect_native() && getenv("SSBU_WIDE_FRAMING")) {
         u64 orig = rt_hook_function(0x7103555140ull, rt_native(wide_copy, "ultrawide framing for the picture"));
         if (orig) copy_orig = rt_lookup(orig);
