@@ -244,9 +244,12 @@ with the game camera widened: first difference frame 578, damage. A stage not na
 
 ## To do (agreed with the owner)
 
-1. **"Stage" camera style, fight-identical**: a shadow camera - the game's own camera update
-   (`f_71004fdc10`, `f_71004fec80`) run on a copy of the camera with the wide aspect; only the picture
-   follows it. Checked by replay hash.
+1. ~~**"Stage" camera style, fight-identical**~~ done (2026-11-11, `SSBU_WIDE_STYLE=stage`): the game's
+   camera widened, slid along the stage's camera range and zoomed in only as far as needed to keep the
+   picture inside it, never past the 16:9 view. Both replays hash the same as 16:9 up to GAME!; past the
+   range: Town and City 0, Bridge of Eldin at most 7 (the game's own 16:9 view). The shadow camera
+   (the game's framing replayed on a copy) is kept as `SSBU_WIDE_STYLE=shadow` for research. Waiting for
+   the owner's feel test (`build\aspect_test\stage.bat`).
 2. **Magnifying glass at the wide edge**: the game clamps the bubble to its 16:9 screen, and the HUD is
    squeezed into the middle 16:9, so the bubble sits on the old 16:9 edge. Clamp it to the picture's
    edge instead and let its draws through the 2D clip box. When it shows stays the 16:9 rule's (a
