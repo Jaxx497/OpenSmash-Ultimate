@@ -30,7 +30,7 @@ why the code takes the long way round.
    which parts the fights on its own. The scripts are in `build\aspect_test\auto\`
    (docs/ULTRAWIDE.md, "The fight stays the same: how to check").
 2. **Switching while playing.** If the feature can change mid-fight, the replay must also be played
-   with it changing on a timer (`SSBU_VIEW_CYCLE`, `SSBU_ASPECT_CYCLE`), and still match.
+   with it changing on a timer (`SSBU_TEST_VIEW_CYCLE`, `SSBU_TEST_ASPECT_CYCLE`), and still match.
 3. **Every renderer.** The fight hash does not depend on the renderer, so the same comparison proves
    each back end.
 4. **Online, by rollback.** In an online match each game sends its fight hash with its inputs and

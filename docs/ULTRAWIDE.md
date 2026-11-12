@@ -38,12 +38,11 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
 | :--- | :--- |
 | `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame, in fights too. 16:9 while an online match is set up or under way (taken before its GO!, never inside an online fight), and for the whole session unless `renderer = direct3d11` (auto draws with Vulkan on AMD, NVIDIA and Intel cards, not ported yet). |
 | `display.ini` `view = wide \| zoomed \| hybrid` (`SSBU_VIEW` over it) | The view, with a picture wider than 16:9. Default hybrid. Also in the settings menu ("View"), at once, mid-fight too. |
-| `SSBU_GAME_FRAMING_WIDE=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
-| `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP` | Old tests. To remove. |
-| `SSBU_CAMERA_HUNT`, `SSBU_CULL_HUNT`, `SSBU_RCAM_WATCH`, `SSBU_CAM_TRACE`, `SSBU_FRAMING_DUMP`, `SSBU_SHADOW_LOG`, F9 | Research and measurement. The traces stay while views are tuned; the hunts go. |
+| `SSBU_DEBUG_REFERENCE_VIEW=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
+| `SSBU_DEBUG_CAMERA_HUNT`, `SSBU_DEBUG_CAM_TRACE=<n>` (`SSBU_DEBUG_CAM_TRACE_OBJ`), `SSBU_DEBUG_FRAMING_DUMP=<n>`, `SSBU_DEBUG_PANES=<text>`, F9 | Research and measurement: who writes the camera's matrices, both cameras every n fight frames, the framing camera object, the HUD's panes by name, which 2D draw is which. |
 | `SSBU_GFX_LOG_CB=all` | F4's draw log dumps every constant buffer bank in full. |
-| `SSBU_ASPECT_CYCLE=<s>` | Test: 16:9, 21:9, 32:9 asked for in turn every s seconds (in fights too). |
-| `SSBU_VIEW_CYCLE=<n>` | Test: the next view every n fight frames, as the menu would (switching mid-fight, checked by replay hash). |
+| `SSBU_TEST_ASPECT_CYCLE=<s>` | Test: 16:9, 21:9, 32:9 asked for in turn every s seconds (in fights too). |
+| `SSBU_TEST_VIEW_CYCLE=<n>` | Test: the next view every n fight frames, as the menu would (switching mid-fight, checked by replay hash). |
 
 ## What the runtime changes (by file)
 
@@ -120,7 +119,7 @@ picture's sides (**measured**) and does not change the fight (**measured**, belo
 
 Copies on the way to the GPU: the scene constant buffer (`cb3`, field of view 41) is written by
 `f_7103553980` (a loop that flushes CPU-side buffers to GPU ones with memcpy); per-draw `cb8` copies
-(field of view 30) by `f_710355a980` / `f_710355ad30` and `main+0xa5c80`. Found with `SSBU_CAMERA_HUNT`
+(field of view 30) by `f_710355a980` / `f_710355ad30` and `main+0xa5c80`. Found with `SSBU_CAMERA_HUNT` (now `SSBU_DEBUG_CAMERA_HUNT`)
 (page write-watch), **measured**.
 
 ## The game: game camera (`app::`) - the one that frames the fight
@@ -151,7 +150,7 @@ were drawn (the game hides a fighter in the magnifying glass) with the glass at 
 ### How the 16:9 camera behaves (measured, 2026-11-11)
 
 A 4-player replay (frames 10-4170; camera range x -170..170, y -50..130; blast zones x +-230) watched at
-16:9 with `SSBU_CAM_TRACE=10` and `SSBU_FIGHT_HASH` (`build\aspect_test\replay169.bat`):
+16:9 with `SSBU_CAM_TRACE=10` (now `SSBU_DEBUG_CAM_TRACE`) and `SSBU_FIGHT_HASH` (`build\aspect_test\replay169.bat`):
 
 - The game camera is a 16:9 rectangle on the fighters' plane: centre `M+0xeb0`, half height
   `M+0xf38 x M+0xf68`, half width = half height x 16/9.
@@ -168,7 +167,7 @@ A 4-player replay (frames 10-4170; camera range x -170..170, y -50..130; blast z
   camera range, so no sideways slide can keep it inside: it has to zoom in, as the game's own framing did
   when its aspect was widened.
 
-The framing camera object (x0 of `f_71004fe4f0`; dumped with `SSBU_FRAMING_DUMP`, a hook that only
+The framing camera object (x0 of `f_71004fe4f0`; dumped with `SSBU_FRAMING_DUMP` (now `SSBU_DEBUG_FRAMING_DUMP`), a hook that only
 reads; same replay):
 
 | Offset | Meaning (measured against the trace and the fighters' positions) |
@@ -186,7 +185,7 @@ framing needs it (spread sideways: zoom in; spread up and down: cannot).
 
 ### The liked mode against the visual-only framing (measured 2026-11-11)
 
-`SSBU_GAME_FRAMING_WIDE=1` (with `SSBU_ASPECT_NATIVE`) is the mode the owner liked: the game's own camera
+`SSBU_GAME_FRAMING_WIDE=1` (now `SSBU_DEBUG_REFERENCE_VIEW`) is the mode the owner liked: the game's own camera
 framing told the wide aspect. It changes the fight (kept for reference: `build\aspect_test\liked.bat`,
 offline only). A live 1v1 on Bridge of Eldin in it, against the owner's 16:9 replay of the same match-up
 and the visual-only framing (`SSBU_WIDE_FRAMING`), view half height by the fighters' spread:
@@ -310,7 +309,7 @@ What is left is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md). Done, with what was l
    the game's camera widened, slid along the stage range and zoomed in only as far as needed to keep the
    picture inside it, never past the 16:9 view. Both replays hash the same as 16:9 up to GAME!; past the
    range: Town and City 0, Bridge of Eldin at most 7 (the game's own 16:9 view). The shadow camera (the
-   game's framing replayed on a copy) is kept as `SSBU_WIDE_STYLE=shadow` for research.
+   game's framing replayed on a copy) was kept as `SSBU_WIDE_STYLE=shadow` for research (removed 2026-11-12).
 2. **Magnifying bubbles at the picture's edge** (2026-11-11): the renderer knows a bubble by its portrait
    (`vs_545fbedf170d65dd`, the fighter's picture from a 128x128 target) and the two draws right after it
    at the same x (ring `vs_38e6664f…`, arrow `vs_1669b7d1…`; x in vertex bank 3 at +0x4c, the ring's at
@@ -320,7 +319,7 @@ What is left is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md). Done, with what was l
 3. **Settings** (2026-11-11): `display.ini` `aspect` and `view`, both in the settings menu; all three
    views fight-identical on the Bridge of Eldin replay.
 4. **The view changes live** (2026-11-11): every view's hooks are in whenever the picture may be wider
-   than 16:9 and each reads the view every frame (`SSBU_VIEW_CYCLE=200` on the Bridge of Eldin replay:
+   than 16:9 and each reads the view every frame (`SSBU_VIEW_CYCLE=200`, now `SSBU_TEST_VIEW_CYCLE`, on the Bridge of Eldin replay:
    the same as 16:9).
 5. **The picture shape changes without a restart** (2026-11-11): the renderer takes the shape asked for
    at its next present, then every 16:9-shaped render target is released and made again at the new width

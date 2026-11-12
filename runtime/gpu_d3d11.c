@@ -5237,7 +5237,7 @@ static void set_samplers(int stage, u32 count, ID3D11SamplerState *const *v) {
     else ID3D11DeviceContext_PSSetSamplers(ctx, lo, hi - lo, v + lo);
 }
 
-/* SSBU_CAMERA_HUNT (research, temporary): a 3D draw's vertex constant buffers searched for a
+/* SSBU_DEBUG_CAMERA_HUNT (research): a 3D draw's vertex constant buffers searched for a
  * camera matrix: rows (or columns) for x and y whose first three entries' lengths differ by 16:9,
  * true of a projection however the view turns it. Each new one is logged with its guest address,
  * which host.c's hunt then watches for the game code writing it. */
@@ -5794,10 +5794,10 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     draw_reads_wide = 0;
     depth_sampled_now = NULL;
     if (ps) bind_resources(regs, cb, SHADER_PIXEL, ps, &params);   /* (first: whether it reads the scene decides the vertex stage's) */
-    {   /* (SSBU_CAMERA_HUNT: 3D draws on a widened target, 300 of them every 10 s) */
+    {   /* (SSBU_DEBUG_CAMERA_HUNT: 3D draws on a widened target, 300 of them every 10 s) */
         static int hunting = -1, budget;
         static u64 next;
-        if (hunting < 0) hunting = getenv("SSBU_CAMERA_HUNT") != NULL;
+        if (hunting < 0) hunting = getenv("SSBU_DEBUG_CAMERA_HUNT") != NULL;
         if (hunting && rt_now_ns() > next) { budget = 300; next = rt_now_ns() + 10000000000ull; }
         cam_hunt_draw = hunting && budget > 0 && rt_wide > 1.0f && dd.DepthEnable && dd.DepthFunc != D3D11_COMPARISON_ALWAYS;
         if (cam_hunt_draw) budget--;
@@ -5824,9 +5824,9 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
     /* (a full-screen pass may test depth with ALWAYS to write it: the half-size depth copy the
      * smoke and other effects are tested against) */
     int depth_tests = depth_on && dd.DepthFunc != D3D11_COMPARISON_ALWAYS;
-    /* (SSBU_ASPECT_NATIVE: the game draws 3D wide itself; only 2D that is not a full-screen pass is squeezed) */
+    /* (a wider picture: the game draws 3D wide itself; only 2D that is not a full-screen pass is squeezed) */
     int squeeze = aspect_native() ? !depth_on && !draw_reads_wide : !(draw_reads_wide && !depth_tests);
-    /* (research, SSBU_ASPECT_NATIVE: F9 steps through the kinds of squeezed 2D draw - vertex and pixel
+    /* (research, a wider picture: F9 steps through the kinds of squeezed 2D draw - vertex and pixel
      * program - drawn in the last second, leaving one unsqueezed: which kind the P1/CPU tags are) */
     if (rt_wide > 1.0f && squeeze && !depth_on && aspect_native()) {
         int k = 0;
@@ -5840,9 +5840,7 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
         /* A 2D draw (no depth test: the HUD, menus) stays inside the middle 16:9: the game parks
          * hidden panels just off its screen, which the squeeze would bring into view. Its scissor
          * (in the game's pixels) is squeezed towards the middle with it. 3D keeps the full width. */
-        static int clamp = -1;
-        if (clamp < 0) clamp = !getenv("SSBU_NO_2D_CLAMP");
-        if (!depth_on && clamp) {
+        if (!depth_on) {
             /* (in a fight the HUD's panels sit where their layouts anchor them, out to the picture's edges
              * (host.c, pane_place): there the 2D reaches the whole picture, ±960 x the widening) */
             float cx = (float)rt_w / 2, reach = hud_wide_on() ? cx * rt_wide : cx;

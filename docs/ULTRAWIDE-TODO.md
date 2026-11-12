@@ -101,10 +101,10 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 
 ## Clean-up
 
-- [ ] Research switches: keep as `SSBU_DEBUG_*` the camera hunt, the F9 picker, the camera trace, the
-      framing dump and the reference view; `SSBU_TEST_ASPECT_CYCLE`, `SSBU_TEST_VIEW_CYCLE`; remove the
-      rest (cull hunt if it costs anything, `RCAM_WATCH`, `ASPECT_HYBRID`, `ASPECT_SCREEN`, `NO_2D_CLAMP`,
-      `WIDE_STYLE=shadow`, `SHADOW_LOG`, `WIDE_FRAMING_STORED`). Docs and `docs/TESTING-RUNS.md` follow.
+- [x] Research switches: kept as `SSBU_DEBUG_CAMERA_HUNT`, `SSBU_DEBUG_CAM_TRACE` (`_OBJ`), `SSBU_DEBUG_FRAMING_DUMP`,
+      `SSBU_DEBUG_REFERENCE_VIEW`, `SSBU_DEBUG_PANES`, F9; `SSBU_TEST_ASPECT_CYCLE`, `SSBU_TEST_VIEW_CYCLE`; removed: the cull
+      hunt, `RCAM_WATCH`, `ASPECT_HYBRID`, `ASPECT_SCREEN`, `NO_2D_CLAMP`, `SHADOW_LOG`, `WIDE_FRAMING_STORED`,
+      `FRAMING_SHADOW` (the wide view's old framing re-run).
 - [ ] `docs/PLAYING.md`: the final settings text.
 
 ## After the first PR (not blocking)

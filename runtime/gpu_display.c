@@ -404,9 +404,9 @@ float display_aspect(void) {
 }
 int display_aspect_take(void) {
     display_aspect();
-    /* SSBU_ASPECT_CYCLE=<s> (test): 16:9, 21:9 and 32:9 asked for in turn, every s seconds */
+    /* SSBU_TEST_ASPECT_CYCLE=<s> (test): 16:9, 21:9 and 32:9 asked for in turn, every s seconds */
     static double cycle = -1;
-    if (cycle < 0) { const char *e = getenv("SSBU_ASPECT_CYCLE"); cycle = e ? atof(e) : 0; }
+    if (cycle < 0) { const char *e = getenv("SSBU_TEST_ASPECT_CYCLE"); cycle = e ? atof(e) : 0; }
     if (cycle > 0 && !display_shape_locked()) {
         static const float SHAPES[] = {16.0f / 9, 21.0f / 9, 32.0f / 9};
         shape_want = SHAPES[(unsigned long long)((double)rt_now_ns() / (cycle * 1e9)) % 3];
