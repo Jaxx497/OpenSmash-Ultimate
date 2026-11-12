@@ -56,6 +56,10 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 ## Bugs to reproduce
 
 - [ ] **Training mode camera stretches** in a wider picture (owner's test).
+- [ ] **Pause camera jumps** (owner, 2026-11-12, 32:9 zoomed, Bridge of Eldin): pausing moves the camera
+      to the game's pause shot from where the game's own 16:9 camera is, not from the picture's camera,
+      so the picture jumps. The pause shot should start from the view the picture shows. Also: the pause
+      menu box sits at the 16:9 view's right edge (HUD decision for the pause menu).
 - [ ] **Zoomed view tighter than 16:9?** If the zoomed picture can be narrower (in the fight's space) than
       the 16:9 view, a fighter can leave the picture without being off-screen by the game's rule: no
       bubble, not seen. The owner records a replay for this edge case; check it in the zoomed view.
