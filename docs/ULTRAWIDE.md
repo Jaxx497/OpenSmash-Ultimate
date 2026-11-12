@@ -76,7 +76,8 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
   - The views, one hook on the game's framing (`framing_hook`, `f_71004fe4f0`) that reads the view every
     frame. Zoomed: the framing and camera-move calls are recorded (`rec_call`) and replayed with the
     picture's shape on a shadow camera of this file's own (`shadow_update`), which the picture follows.
-    Wide: the framing run again for the picture's shape (`framing_dump`). Hybrid: the framing left alone,
+    Wide: the game's own camera, untouched (2026-11-12: it had re-run the framing for the picture's shape,
+    held at 12% of it by a bug; the owner chose the game's framing). Hybrid: the framing left alone,
     the picture's camera slid along the stage range and zoomed in only as needed (`wide_copy`). Nothing
     the fight reads is written.
   - `net_match_watch` (each frame's end, on the game's thread): caches `net_match_on()` for the renderer.

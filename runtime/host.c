@@ -721,14 +721,15 @@ static void wide_copy(Cpu *c) {
     copy_orig(c);
     u64 cam = render_camera();
     if (!cam || dst != cam + 0x1d0 || !in_fight() || !view_on()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; shadow_k = 1; return; }
-    static float ease = -1;
-    if (ease < 0) { const char *e = getenv("SSBU_WIDE_EASE"); ease = e ? (float)atof(e) : 0.12f; if (ease <= 0 || ease > 1) ease = 0.12f; }
     static int cycle = -1;   /* SSBU_VIEW_CYCLE=<n> (test): the next view every n fight frames, as the menu would */
     if (cycle < 0) { const char *e = getenv("SSBU_VIEW_CYCLE"); cycle = e ? atoi(e) : 0; }
     if (cycle > 0) { long long f = fight_test_frame0(); if (f > 0) display_set_view((int)(f / cycle % 3)); }
     if (wide_style_stage()) stage_fit(dst);   /* (sets wide_goal_offset and shadow_k) */
-    else if (!wide_style_shadow()) shadow_k = 1;   /* (the wide view: no zoom) */
-    for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() || wide_style_shadow() ? 1.0f : ease);
+    else if (!wide_style_shadow()) {   /* the wide view: the game's own camera, the side areas added */
+        shadow_k = 1;
+        wide_goal_offset[0] = wide_goal_offset[1] = wide_goal_offset[2] = 0;
+    }
+    for (int i = 0; i < 3; i++) wide_now[i] = wide_goal_offset[i];
     {   /* Paused: the pause shot starts from the picture's view, whose offset fades out as the player
          * moves the pause camera from where it started (gone a quarter of the camera's distance away):
          * kept whole, it would push a zoomed-in pause shot off what it shows. */
@@ -843,12 +844,14 @@ static void shadow_update(Cpu *c) {
 static int wide_style_shadow(void) { return display_view() == VIEW_ZOOMED; }
 static int wide_style_stage(void) { return display_view() == VIEW_HYBRID; }
 /* The game's framing (f_71004fe4f0), one hook for every view: recorded for the zoomed view's shadow
- * camera, run again for the picture's shape for the wide view, left alone for the hybrid view. */
+ * camera, left alone for the wide and hybrid views. (The wide view once ran it again for the picture's
+ * shape and eased toward that; the renderer's copies for other cameras cleared it every frame, so it
+ * sat at 12% of it: owner, 2026-11-12, the game's own framing instead.) */
 static void framing_hook(Cpu *c) {
     static int dump = -1;
     if (dump < 0) dump = getenv("SSBU_FRAMING_DUMP") != NULL;
     if (rec_cam) rec_call(&rec_frame, c, frame_fn_orig);
-    else if (dump || (view_on() && display_view() == VIEW_WIDE)) framing_dump(c);
+    else if (dump) framing_dump(c);
     else frame_fn_orig(c);
 }
 

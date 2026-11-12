@@ -67,11 +67,10 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
       camera started afresh on resume). A pause is the fight now (the ready-go flag stays on); the pause
       shot starts from the picture's view, and the offset fades as the player moves the pause camera
       away. The pause menu box at the 16:9 view's right edge is the pause menu's HUD decision.
-- [ ] **Wide view at 12% of its framing** (found 2026-11-12): the wide view re-runs the game's framing
-      for the picture's shape and eases toward it, but the renderer's copy for other cameras (two more
-      each frame) clears that offset, so it sits at 12% of its goal (-11.8 of -98.4 at Final
-      Destination's edge). The glossary's wide view is the game's own camera with the side areas added,
-      which is closer to no offset at all. Owner: keep, full framing, or no offset?
+- [x] **Wide view at 12% of its framing** (found 2026-11-12): the wide view re-ran the game's framing
+      for the picture's shape, but the renderer's copies for other cameras cleared that offset every
+      frame, so it sat at 12% of it (100% zooms in until the fighters fill the picture, like the zoomed
+      view). Owner: the game's own framing, no shift; matches the glossary's wide view.
 - [ ] **Zoomed view tighter than 16:9?** If the zoomed picture can be narrower (in the fight's space) than
       the 16:9 view, a fighter can leave the picture without being off-screen by the game's rule: no
       bubble, not seen. The owner records a replay for this edge case; check it in the zoomed view.
