@@ -89,8 +89,21 @@ _Avoid_: blue arrows, chevrons
 ### The HUD
 
 **HUD**:
-Everything the game draws over the fight: damage meters, timer, tags, magnifying bubbles. It stays in the 16:9 view, unstretched, except the off-screen markers (magnifying bubbles, and the triple arrows), which go to the picture's edge in the zoomed and hybrid views. Each element's ruling is in ULTRAWIDE.md's "HUD decisions".
+Everything the game draws over the fight: damage meters, timer, tags, magnifying bubbles. Never stretched. Each element is static, dynamic or custom; its ruling is in ULTRAWIDE.md's "HUD decisions".
+When an element shows is always the game's 16:9 rule (a bubble appears at the 16:9 off-screen boundary in every view): only where it is drawn changes, and that is what its kind describes.
 _Avoid_: UI, overlay (the overlay is the runtime's own frame-rate display)
+
+**Static** (HUD element):
+Drawn where the 16:9 view puts it, whatever the picture shape. Example: damage meters.
+_Avoid_: fixed, anchored
+
+**Dynamic** (HUD element):
+Moves into the new space by one rule in every view. Example: tags, which follow their fighter wherever the picture shows it.
+_Avoid_: moving, floating
+
+**Custom** (HUD element):
+Placed by a rule that changes with the circumstances: the view, the mode (training) or a player setting. A custom element's ruling always says what it depends on and why. Examples: magnifying bubbles (by view), the timer (a player setting).
+_Avoid_: special, conditional
 
 **Tag**:
 The marker over a fighter naming its player: P1, P2, CPU.

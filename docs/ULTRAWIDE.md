@@ -10,17 +10,19 @@ the camera should feel like 16:9's (centred, pulling in, not showing much past t
 
 ## HUD decisions
 
-One row per HUD element: what it does in each view, and why. The words are
-[ULTRAWIDE-CONTEXT.md](ULTRAWIDE-CONTEXT.md)'s; what is left to do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
+One row per HUD element: its kind (static, dynamic or custom), what it does in each view, and why. When
+an element shows is always the game's 16:9 rule; the kind is about where it is drawn. A custom row says
+what its rule depends on. The words are [ULTRAWIDE-CONTEXT.md](ULTRAWIDE-CONTEXT.md)'s; what is left to
+do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
 
-| Element | Wide | Zoomed | Hybrid | Status | Decided, and why |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| Tags (P1, CPU) | over the fighter | over the fighter | over the fighter | done | 2026-11-11: they follow the view the picture shows (fixed: the HUD read the camera's own matrix, not the moved one). |
-| Magnifying bubbles | at the 16:9 edge | at the picture's edge | at the picture's edge | done | 2026-11-11: in the wide view the fighter is still in the picture past the 16:9 edge, so a bubble at the far edge looks like a jump off-screen. When a bubble shows stays the game's 16:9 rule (a useful cue near the blast zone). |
-| Fighter in a bubble | drawn while inside the picture | hidden (the game's) | hidden (the game's) | to do | 2026-11-11: in the wide view the fighter should simply stay visible. |
-| Triple arrows | follow the bubble | follow the bubble | follow the bubble | to do | 2026-11-11: they point to an off-screen fighter, so they go where the bubble goes. |
-| Damage meters | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
-| Timer | 16:9 view | 16:9 view | 16:9 view | to decide | Placement on a wider picture not decided yet. |
+| Element | Kind | Wide | Zoomed | Hybrid | Status | Decided, and why |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| Tags (P1, CPU) | dynamic | over the fighter | over the fighter | over the fighter | done | 2026-11-11: they follow the view the picture shows (fixed: the HUD read the camera's own matrix, not the moved one). |
+| Magnifying bubbles | custom: by view | at the 16:9 edge | at the picture's edge | at the picture's edge | done | 2026-11-11/12: they show at the 16:9 off-screen boundary in every view (the game's rule, a useful cue near the blast zone). In the wide view the picture shows past that boundary, so the bubble stays on it: at the picture's far edge it would look like the fighter jumped. In zoomed and hybrid the picture's edge is where the fighter leaves the picture. |
+| Fighter in a bubble | custom: by view | drawn while inside the picture | hidden (the game's) | hidden (the game's) | to do | 2026-11-11: in the wide view the fighter is still inside the picture, so it should simply stay visible. |
+| Triple arrows | custom: by view (to confirm) | follow the bubble | follow the bubble | follow the bubble | to do | 2026-11-11/12: they point to an off-screen fighter, so they go where the bubble goes; the owner checks them in play. |
+| Damage meters | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
+| Timer | custom: player setting | left, right, original, center or hidden | same | same | to decide | 2026-11-12: a setting with those choices; "original" is where 16:9 puts it (open: whether it grows with the picture). |
 | Minimap | - | - | - | to decide | Not looked at yet. |
 | Pause menu | - | - | - | to decide | Not looked at yet. |
 | Training mode elements | - | - | - | to decide | Not looked at yet. |
