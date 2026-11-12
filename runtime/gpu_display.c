@@ -61,7 +61,8 @@ static struct {
     char aspect[16];      /* the picture shape: "16:9", "auto" or "W:H" (docs/ULTRAWIDE-CONTEXT.md) */
     int view;             /* VIEW_* (display.h) */
     int uw_online;        /* experimental_ultrawide_online: the picture shape kept in online matches (read at the start) */
-} cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID};
+    int timer;            /* TIMER_* (display.h): where a fight's timer is drawn */
+} cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID, 0, TIMER_RIGHT};
 
 static int cfg_runahead;   /* display.ini's runahead (display_runahead) */
 
@@ -160,6 +161,9 @@ static const char DEFAULT_INI[] =
     ";   zoomed: the game frames the fight for the wider picture: closer, kept on the stage.\n"
     ";   hybrid: wide, but zoomed in just enough to keep the picture on the stage.\n"
     "view = hybrid\n"
+    "; timer = right | center | left | hidden\n"
+    ";   Where a fight's timer is drawn: right is the game's own place, at the picture's top-right corner.\n"
+    "timer = right\n"
 #ifdef _WIN32
     "\n"
     "; gpu = auto, or part of a graphics card's name (e.g. nvidia, radeon, intel)\n"
@@ -214,6 +218,15 @@ static void parse_view(const char *v, const char *where) {
     else if (!_stricmp(v, "zoomed")) cfg.view = VIEW_ZOOMED;
     else if (!_stricmp(v, "hybrid")) cfg.view = VIEW_HYBRID;
     else fprintf(stderr, "[display] %s: view is wide, zoomed or hybrid, not '%s': hybrid it is\n", where, v);
+}
+
+/* timer = right | center | left | hidden */
+static void parse_timer(const char *v, const char *where) {
+    if (!_stricmp(v, "right")) cfg.timer = TIMER_RIGHT;
+    else if (!_stricmp(v, "center")) cfg.timer = TIMER_CENTER;
+    else if (!_stricmp(v, "left")) cfg.timer = TIMER_LEFT;
+    else if (!_stricmp(v, "hidden")) cfg.timer = TIMER_HIDDEN;
+    else fprintf(stderr, "[display] %s: timer is right, center, left or hidden, not '%s': right it is\n", where, v);
 }
 
 /* renderer = d3d11 | dxvk | metal (the system's own: renderer.h) | vulkan */
@@ -280,6 +293,7 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
         else if (!_stricmp(key, "renderer")) parse_renderer(value, path);
         else if (!_stricmp(key, "aspect")) snprintf(cfg.aspect, sizeof cfg.aspect, "%s", value);
         else if (!_stricmp(key, "view")) parse_view(value, path);
+        else if (!_stricmp(key, "timer")) parse_timer(value, path);
         else if (!_stricmp(key, "volume")) {}   /* (the master volume: ipc_audio.c's audio_master_volume reads it) */
         else if (!_stricmp(key, "language")) {}   /* (the game's language: hle_env.c reads it) */
         else if (!_stricmp(key, "experimental_ultrawide_online")) cfg.uw_online = atoi(value) != 0;
@@ -295,6 +309,7 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     if ((env = getenv("SSBU_RENDERER")) && *env) parse_renderer(env, "SSBU_RENDERER");
     if ((env = getenv("SSBU_ASPECT")) && *env) snprintf(cfg.aspect, sizeof cfg.aspect, "%s", env);
     if ((env = getenv("SSBU_VIEW")) && *env) parse_view(env, "SSBU_VIEW");
+    if ((env = getenv("SSBU_TIMER")) && *env) parse_timer(env, "SSBU_TIMER");
     if (!speed_parse(env = getenv("SSBU_SPEED"), &cfg.speed))
         fprintf(stderr, "[display] SSBU_SPEED is a number of times 60 frames a second, up to %g (0: uncapped), not '%s': normal speed\n", SPEED_MAX, env);
     if (cfg.width < 320) cfg.width = 320;
@@ -427,6 +442,8 @@ void display_set_aspect(const char *text) {
     if (!display_shape_locked()) shape_want = shape_of(text);   /* (taken at the next frame: display_aspect_take) */
 }
 void display_set_view(int view) { load(); cfg.view = view; }   /* (at once: the views read it every frame) */
+int display_timer(void) { load(); return cfg.timer; }
+void display_set_timer(int timer) { load(); cfg.timer = timer; }   /* (at once: the HUD reads it every frame) */
 
 /* (the settings menu) the render scale it saved: shown from now on, the renderer's own counts
  * only at the next start */

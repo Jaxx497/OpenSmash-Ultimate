@@ -22,10 +22,10 @@ do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
 | Fighter in a bubble | custom: by view | drawn while inside the picture | hidden (the game's) | hidden (the game's) | to do | 2026-11-11: in the wide view the fighter is still inside the picture, so it should simply stay visible. |
 | Triple arrows | custom: by view (to confirm) | follow the bubble | follow the bubble | follow the bubble | to do | 2026-11-11/12: they point to an off-screen fighter, so they go where the bubble goes; the owner checks them in play. |
 | Damage meters | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
-| Timer | custom: player setting | right, center, left or hidden | same | same | decided, to do | 2026-11-12 (owner): "Timer position" on the Display page. Right is the game's own place (top right), the default; in a wider picture it is the picture's top-right corner. Center and left are added, and hidden. Same size on one screen at every shape. |
-| Radar (the minimap square) | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-12 (owner): it shows when a fighter is off-screen by the 16:9 rule, as bubbles do; it stays where 16:9 puts it, its contents unchanged (its inner box is the 16:9 view). |
-| Pause menu, pause camera controls | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): same size as at 16:9 on that screen, never stretched, only moved: each panel goes to the side it is laid out against (the pause menu flush with the picture's right edge, P1 PAUSE with its left, as 16:9 has them with the screen's). First try: the game's layouts told the screen is wider, so their own anchors place each panel whole; else whole panels moved toward their side by the extra width. |
-| Training mode elements | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): as the pause menu. |
+| Timer | custom: player setting | right, center, left or hidden | same | same | done | 2026-11-12 (owner): "Timer position" on the Display page (display.ini `timer`), at any shape. Right is the game's place, at the picture's top-right corner (the default); left keeps the same margin from the picture's left edge; center centres it; hidden folds it away. Placed by its own 256 px box, which holds a two-digit minute: checked with a 15-minute match (14:52) in all four places, 32:9 and 16:9, nothing cut off. |
+| Radar (the minimap square) | dynamic (to check in play) | its corner of the picture | same | same | to check | 2026-11-12 (owner: "keep it in the corner"): it shows when a fighter is off-screen by the 16:9 rule, as bubbles do; it slides in from its parking place off the screen's left, so the side rule takes it to the picture's corner. Not yet seen in a test. |
+| Pause menu, pause camera controls | dynamic | at the picture's sides | same | same | done | 2026-11-12 (owner): same size as at 16:9, never stretched, only moved: each panel goes to the side it is laid out against (the pause menu flush with the picture's right edge, PAUSE with its left, the camera controls' lists and buttons to their sides). The fight's layouts mark no anchors, so the side is read from where a panel sits against the screen (host.c, `pane_place`). |
+| Training mode elements | dynamic | at the picture's sides | same | same | done | 2026-11-12 (owner): as the pause menu: the damage panel at the right edge, the + menu (Quit Training, the settings list) at the left; the help line stays centred. The damage meters stay static (an exception by name). |
 | Battle Camera frame (camera controls) | dynamic | marks the whole picture | same | same | to do | 2026-11-12 (owner): the frame shows the shot, so it marks everything the picture shows. |
 | Menus, loading screens | static | black side areas | same | same | done (first PR) | 2026-11-12 (owner): black for the first PR; a blurred fill after it. |
 
@@ -72,6 +72,11 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
 - `runtime/host.c` (Windows only for now):
   - `wide_camera` (each frame's end): the render camera's width `+0x164` (and `+0x16c`) set from the
     shape when wider than 16:9, written back to 16:9's once when 16:9 returns.
+  - `pane_place` (nn::ui2d's Pane::CalculateGlobalMatrixSelf, `f_71000589a0`): in a fight's scene (the game's camera
+    manager exists, from the fight's loading on), a panel laid out against one side of the screen goes to the same side
+    of the picture, whole; parked panels and screen-sized containers scale out with the picture; the edge frame is
+    hidden; the damage meters stay. The timer's place (display.ini `timer`) is set there too, at any shape.
+    `SSBU_DEBUG_PANES=<text>` logs the panes whose names hold the text (the pane's name is at `+0xb0`).
   - `hud_call` and its 12 wrappers: while the HUD's world-to-screen functions run they get 16:9's
     projection and the view the picture shows, so tags land on their fighters (straight through at 16:9).
   - The views, one hook on the game's framing (`framing_hook`, `f_71004fe4f0`) that reads the view every

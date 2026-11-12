@@ -4564,6 +4564,7 @@ static ID3D11Texture2D *unpack_texture(ID3D11Texture2D *bc, const TextureDesc *d
 }
 
 int aspect_native(void);   /* (host.c) */
+int hud_wide_on(void);     /* (host.c: in a fight's scene the HUD reaches the picture's edges) */
 static const Shader *pick_vs[64], *pick_ps[64];
 static u64 pick_seen[64];
 static int npick, pick = -1;
@@ -5842,10 +5843,14 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
         static int clamp = -1;
         if (clamp < 0) clamp = !getenv("SSBU_NO_2D_CLAMP");
         if (!depth_on && clamp) {
-            float l = 0, r = (float)rt_w, cx = (float)rt_w / 2;
+            /* (in a fight the HUD's panels sit where their layouts anchor them, out to the picture's edges
+             * (host.c, pane_place): there the 2D reaches the whole picture, ±960 x the widening) */
+            float cx = (float)rt_w / 2, reach = hud_wide_on() ? cx * rt_wide : cx;
+            float l = cx - reach, r = cx + reach;
             if (regs[M_SCISSOR(0)] & 1) { u32 sh = regs[M_SCISSOR(0) + 1]; l = (float)(sh & 0xFFFF); r = (float)(sh >> 16); }
-            if (l < 0) l = 0;
-            if (r > (float)rt_w) r = (float)rt_w;   /* (a scissor past the screen still stops at its edge) */
+            if (l <= 0 && r >= (float)rt_w) { l = cx - reach; r = cx + reach; }   /* (the game's whole screen: in a fight, the whole picture) */
+            if (l < cx - reach) l = cx - reach;
+            if (r > cx + reach) r = cx + reach;   /* (a scissor past the screen still stops at its edge) */
             D3D11_RECT sr = cur.scissor;
             sr.left = (LONG)floorf((cx + (l - cx) / rt_wide) * rt_sx);
             sr.right = (LONG)ceilf((cx + (r - cx) / rt_wide) * rt_sx);

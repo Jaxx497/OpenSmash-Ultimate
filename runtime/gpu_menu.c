@@ -140,7 +140,7 @@ static const char *const PAGE_NAMES[PAGES] = {"Display", "Controllers", "Online"
 enum { K_INFO, K_CHOICE, K_ACTION, K_TEXT };
 enum { W_NONE, W_NOW, W_RESTART };
 enum {
-    R_NONE, R_WINDOW, R_PACING, R_LATENCY, R_CURSOR, R_OVERLAY, R_SIZE, R_SCALE, R_ASPECT, R_VIEW, R_GPU,
+    R_NONE, R_WINDOW, R_PACING, R_LATENCY, R_CURSOR, R_OVERLAY, R_SIZE, R_SCALE, R_ASPECT, R_VIEW, R_TIMER, R_GPU,
     R_PAD, R_PAD_PLAYER, R_PAD_LAYOUT, R_PAD_DEADZONE, R_PAD_RUMBLE, R_PAD_TRIGGER, R_PAD_DPAD, R_PAD_STICKTAUNT, R_PAD_REMAP, R_PAD_TEST, R_PAD_RESET,
     R_PAD_STICKS, R_PAD_RECAL, R_STICKS_BACK,
     R_RUMBLE, R_KEYBOARD, R_BACKGROUND, R_PADS_FILE,
@@ -951,6 +951,14 @@ static void build(void)
         }
         if (original || locked) snprintf(r->note, sizeof r->note, "only wider than 16:9");
         note_env(r, "SSBU_VIEW");
+        r = add(R_TIMER, K_CHOICE, W_NOW, "Timer position",
+                "Where the timer sits in a fight. Right is the game's own place, in the top-right corner of the picture. "
+                "Center and left move it along the top; hidden takes it away.");
+        {
+            static const char *const TIMERS[] = {"right", "center", "left", "hidden"};
+            snprintf(r->value, sizeof r->value, "%s", TIMERS[display_timer() & 3]);
+        }
+        note_env(r, "SSBU_TIMER");
 #ifdef _WIN32
         r = add(R_GPU, K_CHOICE, W_RESTART, "Graphics card", "Auto picks the fastest card (on a laptop, the NVIDIA or AMD one). Pick another to use it instead.");
         snprintf(r->value, sizeof r->value, "%s", ds.gpu);
@@ -1479,6 +1487,14 @@ static void change(const Row *row, int dir)
         int on = !display_uw_online_saved();
         display_set_uw_online(on);
         set_display("experimental_ultrawide_online", on ? "1" : "0");
+        break;
+    }
+    case R_TIMER:
+    {
+        static const char *const TIMERS[] = {"right", "center", "left", "hidden"};
+        int i = cycle(display_timer(), 4, dir);
+        set_display("timer", TIMERS[i]);
+        display_set_timer(i);
         break;
     }
     case R_VIEW:

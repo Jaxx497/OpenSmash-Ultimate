@@ -45,10 +45,13 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 
 ## HUD (see ULTRAWIDE.md, "HUD decisions")
 
-- [ ] Pause menu elements
-- [ ] Training mode elements
-- [ ] Timer placement
-- [ ] Minimap
+- [x] Pause menu elements: panels to the side their layout puts them against (the game's own layouts; see ULTRAWIDE.md, `pane_place`)
+- [x] Training mode elements (the + menu too)
+- [x] Timer placement: the "Timer position" setting (right, center, left, hidden), two-digit minutes checked
+- [ ] Radar (the minimap square): to its corner by the side rule; see it in play
+- [ ] Battle Camera frame (camera controls' frame overlays) marks the whole picture
+- [ ] A shape changed mid-fight reaches a HUD panel that never changes only at the next fight (making the layouts
+      place themselves again was left out: see `pane_place`); fine unless players switch shapes mid-fight
 - [ ] Triple arrows (the blue arrows) follow the bubbles out, in all three views
 - [ ] Wide view: keep drawing the fighter instead of the bubble while inside the picture
 - [ ] Menus and loading screens: fill the side areas

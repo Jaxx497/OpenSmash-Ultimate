@@ -184,7 +184,7 @@ Settings are separated by commas. A setting left out keeps what the menus chose.
 | `stock=<n>` | The stocks, in a stock match. |
 | `items=on`, `items=off` | The rule's item appearance (2 or 0). |
 | `hazards=on`, `hazards=off` | A flag byte that the stage's set-up takes. |
-| `time=<minutes>` | Read and not used, as in ssbu-recomp. |
+| `time=<minutes>` | The time limit (the match block's `+0x48`, in frames). |
 
 The ids are worked out from the names (the Hash40 of `ui_chara_<name>` or `ui_stage_<name>`), so no list of fighters or stages is kept here. What the game does with a name it doesn't have was not tried. ssbu-recomp's log also named the fighter kind numbers from a bindings file of the game's. That table is game data and is not ported, so the log gives the numbers the game wrote.
 

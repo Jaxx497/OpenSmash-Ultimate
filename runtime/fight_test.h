@@ -181,8 +181,8 @@ static inline uint64_t fixed_entropy(uint64_t n, uint64_t sub) { return fixed_mi
 /* "p1=<fighter>,p2=<fighter>|cpu|human,p3=..,p4=..,c1=<colour>..c4=<colour>,stage=<name>,
  * form=omega|battlefield|normal,hazards=on|off,cpu=<level>,items=on|off,stock=<n>,time=<min>"
  * (ssbu-recomp's debug match; c1..c4: a player's costume, 0-7, as ssbu-recomp's c1..c8). A
- * key left out keeps what it was (a list's lines add up); -1: not set. time is read and, as
- * there, not used. */
+ * key left out keeps what it was (a list's lines add up); -1: not set. time: the time limit in
+ * minutes (the match block's +0x48, in frames). */
 typedef struct DebugMatch {
     char name[4][32], stage[48];
     int p2type, form, hazards, cpu, items, time, stock, colour[4];

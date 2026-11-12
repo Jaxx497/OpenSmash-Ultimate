@@ -13,7 +13,7 @@
  *   shown         the mode the menu shows and the one F11 goes back to: "shown M FULL"
  *   shape S M     the picture shape setting S names on a monitor of shape M: "shape S M -> A"
  *   settings      the display settings as read: "settings window M size WxH pacing P latency L cursor C overlay O
- *                 scale S renderer R aspect A view V uw_online U gpu G" */
+ *                 scale S renderer R aspect A view V uw_online U timer T gpu G" */
 #include "../../runtime/gpu_display.c"
 #include "../../runtime/gpu_renderer.c"
 #include "../../runtime/gpu_vulkan.c"
@@ -43,9 +43,9 @@ int main(int argc, char **argv) {
             i += 2;
         } else if (!strcmp(argv[i], "settings")) {
             load();
-            printf("settings window %d size %dx%d pacing %d latency %d cursor %d overlay %d scale %g renderer %s aspect %s view %d uw_online %d gpu %s\n",
+            printf("settings window %d size %dx%d pacing %d latency %d cursor %d overlay %d scale %g renderer %s aspect %s view %d uw_online %d timer %d gpu %s\n",
                    cfg.mode, cfg.width, cfg.height, (int)cfg.pacing, cfg.latency, cfg.hide_cursor, cfg.overlay, cfg.render_scale,
-                   renderer_name(cfg.renderer), cfg.aspect, cfg.view, cfg.uw_online, cfg.gpu);
+                   renderer_name(cfg.renderer), cfg.aspect, cfg.view, cfg.uw_online, cfg.timer, cfg.gpu);
         } else if (!strcmp(argv[i], "chosen")) printf("chosen %s\n", renderer_name(display_renderer()));
         else if (!strcmp(argv[i], "start")) printf("start %s\n", renderer_name(gfx_renderer_start(NULL)));
         else if (!strcmp(argv[i], "default")) fputs(display_default_ini(), stdout);

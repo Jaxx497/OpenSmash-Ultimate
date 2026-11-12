@@ -79,6 +79,7 @@ class RendererOption(unittest.TestCase):
             ('aspect = 16:9\n', 'aspect 16:9 '), ('aspect = auto\n', 'aspect auto '), ('aspect = 21:9\n', 'aspect 21:9 '), ('aspect = 32:9\n', 'aspect 32:9 '),
             ('view = wide\n', 'view 0 '), ('view = zoomed\n', 'view 1 '), ('view = hybrid\n', 'view 2 '),
             ('experimental_ultrawide_online = 0\n', 'uw_online 0 '), ('experimental_ultrawide_online = 1\n', 'uw_online 1 '),
+            ('timer = right\n', 'timer 0 '), ('timer = center\n', 'timer 1 '), ('timer = left\n', 'timer 2 '), ('timer = hidden\n', 'timer 3 '),
             ('gpu = nvidia\n', 'gpu nvidia'), ('language = en_us\nvolume = 80\nrunahead = 0\n', 'settings '),
         ]
         for ini, want in rows:

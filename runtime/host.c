@@ -904,7 +904,11 @@ static int aspect_hybrid(void) {
  * the renderer, which takes 16:9 for it between fights (display_aspect_take). */
 static volatile int net_match_seen;
 int net_match_on(void);   /* (hle_rb_core.c) */
-static void net_match_watch(Cpu *c, const u64 args[8], void *ctx) { (void)c; (void)args; (void)ctx; net_match_seen = net_match_on(); }
+static volatile int hud_wide_seen;
+static int hud_wide_now(void);   /* (below) */
+static void net_match_watch(Cpu *c, const u64 args[8], void *ctx) { (void)c; (void)args; (void)ctx; net_match_seen = net_match_on(); hud_wide_seen = hud_wide_now(); }
+/* (for the renderer: the HUD's panels reach the picture's edges, so its 2D may too - gpu_d3d11.c's 2D clip) */
+int hud_wide_on(void) { return hud_wide_seen; }
 int net_match_now(void) { return net_match_seen; }
 static void wide_camera(Cpu *c, const u64 args[8], void *ctx) {
     (void)c; (void)args; (void)ctx;
@@ -984,6 +988,129 @@ static void hud_call(int k, Cpu *c) {
 #define HUDW(k) static void hud_w##k(Cpu *c) { hud_call(k, c); }
 HUDW(0) HUDW(1) HUDW(2) HUDW(3) HUDW(4) HUDW(5) HUDW(6) HUDW(7) HUDW(8) HUDW(9) HUDW(10) HUDW(11)
 static GuestFn *const hud_wrappers[NHUD] = {hud_w0, hud_w1, hud_w2, hud_w3, hud_w4, hud_w5, hud_w6, hud_w7, hud_w8, hud_w9, hud_w10, hud_w11};
+/* The HUD's panels where their layouts put them against the screen's edges (owner, 2026-11-12). The
+ * game lays its 2D out with nn::ui2d; f_71000589a0 (Pane::CalculateGlobalMatrixSelf, x0 the pane) works
+ * out a pane's place from its position (+0x30), its size (+0x50) and scale (+0x48) about its own
+ * origin (+0x5b, bits 0-1: 1 left edge, 2 right edge, else the centre), under its parent (+0x18). The
+ * fight's layouts mark no anchors (the parent-anchor bits, +0x5b bits 4-5, are 0), so the anchor is read
+ * from where the pane is: a pane whose parents up to the layout's root are all the screen (1920 x 1080)
+ * and whose right edge is within 120 px of the screen's right edge (the timer, the pause menu,
+ * Training's damage panel) is moved right by the picture's extra width on that side, whole and at its
+ * own size; the left edge likewise (P1 PAUSE, the camera controls list); a pane reaching both, or
+ * neither, stays. The renderer's 2D squeeze maps the wider range back onto the picture. Tags and bubbles
+ * hang under a larger "world" pane, not the screen, and are left to their own rules. In fights only:
+ * menus keep 16:9 (black sides, owner). */
+static int screen_like(u64 p) {   /* (the screen's size, 1920 x 1080, or a little more: a frame just past its edges) */
+    float w = *P(float, p + 0x50), h = *P(float, p + 0x54);
+    return w >= 1919.5f && w <= 2100 && h >= 1079.5f && h <= 1200;
+}
+static int pane_extent(u64 p, float *l, float *r, int depth);   /* (below) */
+/* A plain grouping pane at the screen's origin reaching both of its edges stands for the screen too: what is
+ * under it is placed one by one (Training's menu_L holds its settings menu at the left and more at the right). */
+static int screen_group(u64 p) {
+    float l, r;
+    return *P(u64, p) == 0x7104f3f810ull && fabsf(*P(float, p + 0x30)) < 0.5f && fabsf(*P(float, p + 0x48) - 1) < 1e-3f &&
+           pane_extent(p, &l, &r, 0) && l <= -960 + 120 && r >= 960 - 120;
+}
+static int screen_chain(u64 p) {   /* (the pane and every parent up to the layout's root: the screen) */
+    for (int depth = 0; p && depth < 16; depth++, p = *P(u64, p + 0x18))
+        if (!screen_like(p) && !(*P(u64, p + 0x18) && screen_group(p))) return 0;
+    return p == 0;
+}
+/* Where a pane reaches across, in its parent's units: its own box about its origin (+0x5b bits 0-1: 1 left
+ * edge, 2 right edge, else the centre), or, for a plain grouping pane (nn::ui2d::Pane's own vtable, which
+ * draws nothing) with panes under it, what its visible ones (+0x58 bit 0) reach. Returns 0 for nothing. */
+static int pane_extent(u64 p, float *l, float *r, int depth) {
+    float x = *P(float, p + 0x30), s = fabsf(*P(float, p + 0x48));
+    if (*P(u64, p) == 0x7104f3f810ull && *P(u64, p + 0x28) != p + 0x20 && depth < 8) {
+        float lo = 1e9f, hi = -1e9f;
+        int any = 0, n = 0;
+        for (u64 node = *P(u64, p + 0x28); node != p + 0x20 && n < 256; node = *P(u64, node + 8), n++) {
+            float cl, cr;
+            if ((*P(u8, node - 8 + 0x58) & 1) && pane_extent(node - 8, &cl, &cr, depth + 1)) { any = 1; lo = fminf(lo, cl); hi = fmaxf(hi, cr); }
+        }
+        if (!any) return 0;
+        *l = x + s * lo; *r = x + s * hi;
+        return 1;
+    }
+    float w = *P(float, p + 0x50) * s;
+    int origin = *P(u8, p + 0x5b) & 3;
+    *l = origin == 1 ? x : origin == 2 ? x - w : x - w / 2;
+    *r = *l + w;
+    return 1;
+}
+/* A fight's scene, from its loading on (the game's camera manager, main+0x52b8f00, exists only there): the
+ * HUD's layouts are placed once when they load, before GO!, and again only when they change, so a shape changed
+ * mid-fight reaches a panel that never changes at the next fight. (Making every layout place itself again -
+ * Pane::Calculate, f_7100058700, with x3 = 1 at its root - changed a fight from frame 328: never.) */
+static int hud_wide_now(void) { return aspect_native() && *P(u64, 0x71052b8f00ull) != 0; }
+static GuestFn *pane_place_orig;
+static void pane_place(Cpu *c) {
+    u64 pane = c->x[0], parent = *P(u64, pane + 0x18);
+    float *x = NULL, x0 = 0, *sx = NULL, sx0 = 0, g = display_aspect() / (16.0f / 9);
+    int on = hud_wide_now();
+    const char *name = P(char, pane + 0xb0);
+    if (parent && !*P(u64, parent + 0x18) && !strcmp(name, "time") && *P(u64, 0x71052b8f00ull)) {
+        /* The fight's timer (display.ini timer, the Display page's "Timer position"; any shape): placed by its own box
+         * (256 px, its right edge its origin), which holds a two-digit minute too, so no time is ever cut off. Right is
+         * the game's place, at the picture's corner; left keeps the same margin from the picture's left edge; center
+         * centres the box; hidden folds it away. */
+        int where = display_timer();
+        float gw = on ? g : 1, half = 960 * gw, w = *P(float, pane + 0x50) * fabsf(*P(float, pane + 0x48)), l0, r0;
+        pane_extent(pane, &l0, &r0, 99);   /* (depth 99: its own box, not its digits) */
+        x = P(float, pane + 0x30);
+        x0 = *x;
+        if (where == TIMER_HIDDEN) { sx = P(float, pane + 0x48); sx0 = *sx; *sx = 0; }
+        else if (where == TIMER_CENTER) *x = x0 - (l0 + r0) / 2;
+        else if (where == TIMER_LEFT) *x = x0 + (-half + (960 - r0)) - l0;
+        else *x = x0 + 960 * (gw - 1);
+        (void)w;
+        pane_place_orig(c);
+        *x = x0;
+        if (sx) *sx = sx0;
+        return;
+    }
+    if (on && g > 1.001f && !strcmp(name, "edge_y")) {
+        /* The yellow frame of set_parts_edge (1990 x 1150), its border just past the screen's edges, where the
+         * console never shows it: hidden while the picture is wider (its drawing keeps its 16:9 shape whatever its
+         * size or scale says, so its border would stand in the picture at the 16:9 edges) */
+        sx = P(float, pane + 0x48);
+        sx0 = *sx;
+        *sx = 0;
+    }
+    int meter = name[0] == 'p' && name[1] >= '1' && name[1] <= '8' && !name[2];   /* (the damage meters p1..p8: static, owner) */
+    if (parent && on && g > 1.001f && !meter && screen_chain(parent) && strncmp(name, "set_parts_message_", 18) && !screen_group(pane)) {
+        x = P(float, pane + 0x30);
+        x0 = *x;
+        if (screen_like(pane)) {
+            *x = x0 * g;                              /* (a screen: parked one screen away stays one picture away) */
+        } else {
+            float l = 0, r = 0;
+            if (!pane_extent(pane, &l, &r, 0)) l = r = 0;   /* (nothing visible under it: left where it is) */
+            int right = r >= 960 - 120, left = l <= -960 + 120;
+            if (l >= 960 || r <= -960) *x = x0 * g;                        /* (parked off the screen: off the picture) */
+            else if (right != left) *x = x0 + (right ? 1 : -1) * 960 * (g - 1);   /* (against one edge: against the picture's) */
+        }
+    }
+    if (getenv("SSBU_DEBUG_PANES")) {   /* SSBU_DEBUG_PANES=<text> (HUD research): the panes whose name, or a parent's, holds it */
+        const char *want = getenv("SSBU_DEBUG_PANES");
+        u64 q = pane; int under = 0;
+        for (int d = 0; q && d < 10; d++, q = *P(u64, q + 0x18)) if (strstr(P(char, q + 0xb0), want)) under = 1;
+        static u64 t, burst;
+        if (under && rt_now_ns() - t > 3000000000ull) { t = rt_now_ns(); burst = t; }
+        if (under && rt_now_ns() - burst < 50000000ull)
+            printf("[panes] %-22.22s < %-18.18s vt %#llx vis %d a %u origin %u pos %g %g size %g %g scale %g\n", name, P(char, parent + 0xb0), (unsigned long long)*P(u64, pane),
+                   *P(u8, pane + 0x58) & 1, *P(u8, pane + 0x59), *P(u8, pane + 0x5b) & 3, *P(float, pane + 0x30), *P(float, pane + 0x34), *P(float, pane + 0x50), *P(float, pane + 0x54), *P(float, pane + 0x48));
+    }
+    pane_place_orig(c);
+    if (x) *x = x0;
+    if (sx) *sx = sx0;
+}
+static void hook_hud_anchors(void) {
+    u64 orig = rt_hook_function(0x71000589a0ull, rt_native(pane_place, "ultrawide HUD anchors"));
+    if (orig) pane_place_orig = rt_lookup(orig);
+    printf("[aspect] the HUD's panels at the picture's edges: %s (main+0x589a0)\n", orig ? "on" : "NOT hooked");
+}
 static void hook_hud_projection(void) {
     int n = 0;
     for (u32 k = 0; k < NHUD; k++) {
@@ -2055,7 +2182,8 @@ static DWORD WINAPI guest_main(LPVOID unused) {
 #ifdef _WIN32
 #endif
 #ifdef _WIN32
-    if (!display_shape_locked()) hook_hud_projection();   /* (the shape can change between fights: in from the start, passing through at 16:9) */
+    if (!display_shape_locked()) hook_hud_projection();
+    hook_hud_anchors();   /* (the timer's place is a setting at any shape; the widening parts wait for a wider picture) */   /* (the shape can change between fights: in from the start, passing through at 16:9) */
     int views = !display_shape_locked() && !getenv("SSBU_GAME_FRAMING_WIDE");   /* (every view's hooks: view and shape can change) */
     if (!views && (getenv("SSBU_FRAMING_DUMP") || getenv("SSBU_GAME_FRAMING_WIDE"))) hook_framing_dump();
     if (views) {

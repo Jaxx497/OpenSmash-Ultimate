@@ -44,6 +44,10 @@ int display_view(void);
 const char *display_aspect_setting(void);
 void display_set_aspect(const char *text);
 void display_set_view(int view);
+/* Where a fight's timer is drawn (display.ini timer; the settings menu changes it at once). */
+enum { TIMER_RIGHT, TIMER_CENTER, TIMER_LEFT, TIMER_HIDDEN };
+int display_timer(void);
+void display_set_timer(int timer);
 /* The picture (display_aspect's shape) centred in a w x h back buffer. */
 void display_fit(unsigned w, unsigned h, unsigned *x, unsigned *y, unsigned *fw, unsigned *fh);
 int display_latency(void);              /* frames the GPU may queue ahead: 1-3 */
