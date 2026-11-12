@@ -30,17 +30,17 @@ void display_note_refresh(int hz);                /* the window's monitor refres
 /* The renderer, at a present: the window's client size, when it changed since the last call. */
 int display_take_size(unsigned *w, unsigned *h);
 /* The picture's shape, width over height, as drawn now: 16:9 unless display.ini's aspect (SSBU_ASPECT)
- * says otherwise, at most 32:9 (gpu_display.c). It changes only between fights (display_aspect_take). */
+ * says otherwise, at most 32:9; 16:9 for online matches (gpu_display.c, display_aspect_take). */
 float display_aspect(void);
 /* 1: always 16:9 this session (started for online play, or a renderer not ported yet). */
 int display_shape_locked(void);
-/* (the renderer, between two frames) 1 when the shape asked for is taken now: no fight is running. */
+/* (the renderer, between two frames) 1 when a new shape is taken now (never in an online fight). */
 int display_aspect_take(void);
 /* The view (docs/ULTRAWIDE-CONTEXT.md): display.ini view, SSBU_VIEW over it. */
 enum { VIEW_WIDE, VIEW_ZOOMED, VIEW_HYBRID };
 int display_view(void);
-/* (the settings menu) the picture shape as set, and a change to it: taken at the next frame with no
- * fight running; a view change is taken at once. */
+/* (the settings menu) the picture shape as set, and a change to it; both are taken at once (the shape
+ * at the next frame, the view now). */
 const char *display_aspect_setting(void);
 void display_set_aspect(const char *text);
 void display_set_view(int view);

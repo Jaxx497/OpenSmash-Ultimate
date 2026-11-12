@@ -352,7 +352,8 @@ static float shape_of(const char *e) {
     return a > 16.0f / 9 + 1e-3f ? a : 16.0f / 9;
 }
 /* The shape drawn now, and the one asked for (the settings menu): the renderer takes it between two
- * frames when no fight is running (display_aspect_take), so a fight never sees the change. */
+ * frames (display_aspect_take). Offline at once, in fights too (only the picture changes: the fight is
+ * the same, checked by replay); 16:9 for an online match, and around one never in its fight (a hitch). */
 static volatile float shape_now, shape_want;
 float display_aspect(void) {
     if (shape_now == 0) {
@@ -366,25 +367,21 @@ float display_aspect(void) {
 }
 int display_aspect_take(void) {
     display_aspect();
-    /* SSBU_ASPECT_CYCLE=<s> (test): 16:9, 21:9 and 32:9 asked for in turn, every s seconds; with
-     * SSBU_ASPECT_ANYTIME=1 (test) taken in fights too */
+    /* SSBU_ASPECT_CYCLE=<s> (test): 16:9, 21:9 and 32:9 asked for in turn, every s seconds */
     static double cycle = -1;
-    static int anytime;
-    if (cycle < 0) {
-        const char *e = getenv("SSBU_ASPECT_CYCLE");
-        cycle = e ? atof(e) : 0;
-        anytime = getenv("SSBU_ASPECT_ANYTIME") != NULL;
-    }
+    if (cycle < 0) { const char *e = getenv("SSBU_ASPECT_CYCLE"); cycle = e ? atof(e) : 0; }
     if (cycle > 0 && !display_shape_locked()) {
         static const float SHAPES[] = {16.0f / 9, 21.0f / 9, 32.0f / 9};
         shape_want = SHAPES[(unsigned long long)((double)rt_now_ns() / (cycle * 1e9)) % 3];
     }
+    static int for_online;   /* (the shape now is 16:9 for an online match) */
     int online = !display_shape_locked() && net_match_now();
     float want = online ? 16.0f / 9 : shape_want;   /* (online matches: 16:9, owner 2026-11-11) */
-    if (want == shape_now || (game_fight_on() && !anytime)) return 0;
+    if (want == shape_now || ((online || for_online) && game_fight_on())) return 0;   /* (an online fight: never a hitch in it) */
     fprintf(stderr, "[display] picture shape now %.4g (was %.4g)%s%s\n", want, shape_now, online ? ", for an online match" : "",
-            game_fight_on() ? ", in a fight (SSBU_ASPECT_ANYTIME)" : "");
+            game_fight_on() ? ", in a fight" : "");
     shape_now = want;
+    for_online = online;
     return 1;
 }
 int display_view(void) { load(); return cfg.view; }
@@ -392,7 +389,7 @@ const char *display_aspect_setting(void) { load(); return cfg.aspect; }
 void display_set_aspect(const char *text) {
     display_aspect();
     snprintf(cfg.aspect, sizeof cfg.aspect, "%s", text);
-    if (!display_shape_locked()) shape_want = shape_of(text);   /* (taken at the next frame with no fight running) */
+    if (!display_shape_locked()) shape_want = shape_of(text);   /* (taken at the next frame: display_aspect_take) */
 }
 void display_set_view(int view) { load(); cfg.view = view; }   /* (at once: the views read it every frame) */
 

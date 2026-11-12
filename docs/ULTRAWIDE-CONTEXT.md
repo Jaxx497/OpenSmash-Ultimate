@@ -9,7 +9,7 @@ fight a 16:9 screen would have. The working notes and the map of the game's code
 ### The picture
 
 **Picture shape**:
-The width over the height of what the player sees, e.g. 32:9 or 43:18; from 16:9 up to 32:9, the widest supported. It changes only between fights, and is 16:9 for online matches.
+The width over the height of what the player sees, e.g. 32:9 or 43:18; from 16:9 up to 32:9, the widest supported. It can change at any time offline, and is 16:9 for online matches.
 _Avoid_: aspect, resolution, ratio
 
 **16:9 view**:
