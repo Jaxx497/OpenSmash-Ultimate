@@ -93,7 +93,8 @@ Address: `*(*(main+0x5337ce8) + 0x490)` is a manager `m`; the camera is `*(m + 0
 
 | Offset | Value at 16:9 | Meaning |
 | :--- | :--- | :--- |
-| +0x150 | 0 | projection kind (0 perspective) |
+| +0x140 | l, r, t, b | the orthographic box (Training: about -44.6, 44.6, 25.1, -25.1: 16:9); the projection is built from it when the kind is 1 (**measured**) |
+| +0x150 | 0 | projection kind (0 perspective; 1 orthographic: Training) |
 | +0x15c | 30, 41 | field of view, degrees (41: the entry; 30: the fight) |
 | +0x160 | 0.5236 | field of view, radians |
 | +0x164 | 1920 | width: **the projection is built from this** (widening it alone widened the projection, measured) |

@@ -55,7 +55,13 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 
 ## Bugs to reproduce
 
-- [ ] **Training mode camera stretches** in a wider picture (owner's test).
+- [x] **Training mode camera stretches** in a wider picture (owner's test): Training's camera is
+      orthographic (`+0x150` = 1), its projection built from a 16:9 box (`+0x140`), not from the width
+      the fight's camera takes, so the 3D was drawn 2x wide (grid cells 61 x 31 px; 16:9: square). Its
+      drawing projection is widened after the copy now (cells square, side areas drawn, tags on their
+      fighters). Wide and zoomed look the same there: an orthographic camera has no distance to zoom by.
+      Scripted route: title A, RIGHT, UP, A (Games & More), DOWN, LEFT, A (Training), wait, A, SUP x3, A,
+      PLUS, A (`build/aspect_test/auto/train_*.bat`).
 - [x] **A menu's selection frame strays into the side area** (owner, 2026-11-12, 32:9 zoomed or hybrid,
       Vault > Replays > Replay Data): the magnifying bubble mover took the menu's replay thumbnails and
       selection frame for a bubble (the same vertex programs as a bubble's portrait and ring; the left tile

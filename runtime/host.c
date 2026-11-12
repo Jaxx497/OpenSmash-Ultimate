@@ -720,6 +720,18 @@ static void wide_copy(Cpu *c) {
     u64 dst = c->x[0];
     copy_orig(c);
     u64 cam = render_camera();
+    /* Training's camera is orthographic (+0x150 = 1; its box at +0x140: left, right, top, bottom), and the
+     * game builds that projection (+0x290, inverse +0x2d0) from the box, 16:9 whatever +0x164 says: the
+     * 3D was drawn stretched across a wider picture. Widened here for drawing, after the copy; only the
+     * game's own 16:9 matrix is changed (the check), so a second copy in one frame leaves it alone. */
+    if (cam && dst == cam + 0x1d0 && view_on() && *P(u32, cam + 0x150) == 1) {
+        const float *box = P(float, cam + 0x140);
+        float *pr = P(float, cam + 0x290), *inv = P(float, cam + 0x2d0), w = box[1] - box[0];
+        if (w > 1e-3f && fabsf(pr[0] * w - 2) < 1e-3f) {
+            pr[0] = 2 / (w * display_aspect() / (16.0f / 9));
+            inv[0] = 1 / pr[0];
+        }
+    }
     if (!cam || dst != cam + 0x1d0 || !in_fight() || !view_on()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; shadow_k = 1; return; }
     static int cycle = -1;   /* SSBU_VIEW_CYCLE=<n> (test): the next view every n fight frames, as the menu would */
     if (cycle < 0) { const char *e = getenv("SSBU_VIEW_CYCLE"); cycle = e ? atoi(e) : 0; }
