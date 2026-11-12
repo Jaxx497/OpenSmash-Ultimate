@@ -849,11 +849,25 @@ static int pane_extent(u64 p, float *l, float *r, int depth) {
     return 1;
 }
 /* A fight's scene, from its loading on (the game's camera manager, main+0x52b8f00, exists only there): the
- * HUD's layouts are placed once when they load, before GO!, and again only when they change, so a shape changed
- * mid-fight reaches a panel that never changes at the next fight. (Making every layout place itself again -
- * Pane::Calculate, f_7100058700, with x3 = 1 at its root - changed a fight from frame 328: never.) */
+ * HUD's layouts are placed once when they load, before GO!, and again only when they change. */
 static int hud_wide_now(void) { return aspect_native() && *P(u64, 0x71052b8f00ull) != 0; }
-static GuestFn *pane_place_orig;
+static GuestFn *pane_place_orig, *pane_calc_orig;
+/* When the picture's shape changes inside a fight's scene, every layout is placed again for half a second
+ * (Pane::Calculate, f_7100058700, with x3 = 1 at a root: its whole tree recomputed), so a panel that never
+ * changes takes the new shape at once. Only then: a fight's loading places everything fresh anyway. */
+static volatile u64 hud_again_until;
+static void pane_calc(Cpu *c) {
+    if (!*P(u64, c->x[0] + 0x18)) {
+        static float placed_for;   /* (0: no fight's scene) */
+        float now = *P(u64, 0x71052b8f00ull) ? display_aspect() : 0;
+        if (now != placed_for) {
+            if (now && placed_for) hud_again_until = rt_now_ns() + 500000000ull;
+            placed_for = now;
+        }
+        if (rt_now_ns() < hud_again_until) c->x[3] |= 1;
+    }
+    pane_calc_orig(c);
+}
 static void pane_place(Cpu *c) {
     u64 pane = c->x[0], parent = *P(u64, pane + 0x18);
     float *x = NULL, x0 = 0, *sx = NULL, sx0 = 0, g = display_aspect() / (16.0f / 9);
@@ -918,6 +932,9 @@ static void pane_place(Cpu *c) {
 static void hook_hud_anchors(void) {
     u64 orig = rt_hook_function(0x71000589a0ull, rt_native(pane_place, "ultrawide HUD anchors"));
     if (orig) pane_place_orig = rt_lookup(orig);
+    u64 calc = rt_hook_function(0x7100058700ull, rt_native(pane_calc, "ultrawide HUD placed again"));
+    if (calc) pane_calc_orig = rt_lookup(calc);
+    if (!calc) orig = 0;
     printf("[aspect] the HUD's panels at the picture's edges: %s (main+0x589a0)\n", orig ? "on" : "NOT hooked");
 }
 static void hook_hud_projection(void) {

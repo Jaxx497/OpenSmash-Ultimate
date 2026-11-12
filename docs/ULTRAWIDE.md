@@ -75,6 +75,8 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
     manager exists, from the fight's loading on), a panel laid out against one side of the screen goes to the same side
     of the picture, whole; parked panels and screen-sized containers scale out with the picture; the edge frame is
     hidden; the damage meters stay. The timer's place (display.ini `timer`) is set there too, at any shape.
+    `pane_calc` (Pane::Calculate, `f_7100058700`): after a shape change inside a fight's scene, every layout is
+    placed again for half a second (x3 = 1 at its root), so panels that never change follow at once.
     `SSBU_DEBUG_PANES=<text>` logs the panes whose names hold the text (the pane's name is at `+0xb0`).
   - `hud_call` and its 12 wrappers: while the HUD's world-to-screen functions run they get 16:9's
     projection and the view the picture shows, so tags land on their fighters (straight through at 16:9).

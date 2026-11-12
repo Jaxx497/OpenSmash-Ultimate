@@ -52,8 +52,8 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
       picture's top-left corner for a fighter off the left, top-right (under the timer) for one off the right
 - [x] Radar's inner box (the Battle Camera frame): left as the game draws it (owner, 2026-11-12: widening it may
       overlap other things)
-- [ ] A shape changed mid-fight reaches a HUD panel that never changes only at the next fight (making the layouts
-      place themselves again was left out: see `pane_place`); fine unless players switch shapes mid-fight
+- [x] A shape changed mid-fight reaches every HUD panel at once (owner, 2026-11-12): the layouts are placed again for
+      half a second after the change; the replay with the shape cycling every 7 s matches 16:9 up to GAME!
 - [ ] Triple arrows (the blue arrows) follow the bubbles out, in all three views (owner: what makes them appear is
       still to be found; not blocking the first PR)
 - [x] Wide view: the bubble stays at the 16:9 edge, marking a fighter off the standard view (owner, 2026-11-12: as it
