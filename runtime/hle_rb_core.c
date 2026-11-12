@@ -40,6 +40,7 @@ int rb_pad_sampling(u64 *sampling) { (void)sampling; return 0; }
 int rb_ra_predicting(void) { return 0; }
 void rb_guest_writing(void *p, u64 n) { (void)p; (void)n; }   /* (hle_rb_state.c's state map) */
 int rb_page_cold(const void *p) { (void)p; return 0; }
+int net_match_on(void) { return 0; }
 #else
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
@@ -3321,6 +3322,13 @@ static int lw_room_others(u32 *out, int max) {
     for (int i = 0; i < n && k < max; i++)
         if (m[i] != me && ldn_in_network(m[i])) out[k++] = m[i];
     return k;
+}
+/* (host.c, at each frame end on the game's thread, for gpu_display.c's picture shape: 16:9 for these) A networked
+ * match is set up or under way: an Online one (melee mode 14, whichever netcode plays it), one agreed for rollback
+ * (Online or a Local Wireless room's), a relay room's, or any while this game is in a Local Wireless room with others. */
+int net_match_on(void) {
+    u32 others[8];
+    return online_match || (net_mode == 2 && net_armed) || ld8(MELEE_INFO) == ONLINE_MELEE || lw_room_others(others, 8) > 0;
 }
 static int online_setup(u64 st) {
     online_forget("a new match set-up");

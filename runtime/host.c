@@ -858,6 +858,13 @@ static int aspect_hybrid(void) {
     if (on < 0) on = getenv("SSBU_ASPECT_HYBRID") && display_aspect() != 16.0f / 9;
     return on;
 }
+/* Online play stays 16:9 (owner, 2026-11-11, until the views are checked online): whether a networked match is set
+ * up or under way, asked on the game's thread at each frame end (net_match_on reads the lobby's room) and kept for
+ * the renderer, which takes 16:9 for it between fights (display_aspect_take). */
+static volatile int net_match_seen;
+int net_match_on(void);   /* (hle_rb_core.c) */
+static void net_match_watch(Cpu *c, const u64 args[8], void *ctx) { (void)c; (void)args; (void)ctx; net_match_seen = net_match_on(); }
+int net_match_now(void) { return net_match_seen; }
 static void wide_camera(Cpu *c, const u64 args[8], void *ctx) {
     (void)c; (void)args; (void)ctx;
     u64 a = *P(u64, 0x7105337ce8ull);
@@ -2368,6 +2375,7 @@ int main(int argc, char **argv) {
     AddVectoredExceptionHandler(1, on_fault);
     if (!display_shape_locked()) {
         frame_hook_add(FRAME_HOOK_END, 300, NULL, wide_camera, NULL);
+        frame_hook_add(FRAME_HOOK_END, 300, NULL, net_match_watch, NULL);
         printf("[aspect] native: the fight camera and its framing told %.4g\n", display_aspect());
     }
     if (getenv("SSBU_CAM_TRACE")) frame_hook_add(FRAME_HOOK_END, 300, NULL, cam_trace, NULL);

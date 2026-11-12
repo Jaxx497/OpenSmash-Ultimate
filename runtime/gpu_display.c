@@ -320,25 +320,22 @@ const char *display_gpu(void) { load(); return cfg.gpu; }
 float display_render_scale(void) { load(); return cfg.render_scale; }
 int display_renderer(void) { load(); return cfg.renderer; }
 /* The picture shape (display.ini aspect, SSBU_ASPECT over it): "W:H", a number, or auto (the primary
- * monitor's shape); 16:9 for anything not wider, at most 32:9 (the widest supported). Always 16:9 in a
- * session started for online play (--online, SSBU_RB_NET: until the views are checked online) and with
- * any renderer but Direct3D 11 (the others are not ported yet): display_shape_locked. */
-int settings_online(void);   /* (hle_settings.c) */
+ * monitor's shape); 16:9 for anything not wider, at most 32:9 (the widest supported). 16:9 for online
+ * matches (display_aspect_take) and, for the whole session, with any renderer but Direct3D 11 (the
+ * others are not ported yet): display_shape_locked. */
 int game_fight_on(void);     /* (hle_fight_test.c) */
+int net_match_now(void);     /* (host.c: a networked match set up or under way) */
 int display_shape_locked(void) {
     static int locked = -1;
     if (locked < 0) {
-        const char *rb = getenv("SSBU_RB_NET");
         load();
-        int online = settings_online() || (rb && *rb && _stricmp(rb, "off"));
 #ifdef _WIN32
-        int other = cfg.renderer == RENDERER_VULKAN;
+        locked = cfg.renderer == RENDERER_VULKAN;
 #else
-        int other = 1;
+        locked = 1;
 #endif
-        locked = online || other;
         if (locked && _stricmp(cfg.aspect, "16:9"))
-            fprintf(stderr, "[display] picture shape 16:9 (aspect = %s set): %s\n", cfg.aspect, online ? "online play" : "only Direct3D 11 draws wider pictures yet");
+            fprintf(stderr, "[display] picture shape 16:9 (aspect = %s set): only Direct3D 11 draws wider pictures yet\n", cfg.aspect);
     }
     return locked;
 }
@@ -382,9 +379,12 @@ int display_aspect_take(void) {
         static const float SHAPES[] = {16.0f / 9, 21.0f / 9, 32.0f / 9};
         shape_want = SHAPES[(unsigned long long)((double)rt_now_ns() / (cycle * 1e9)) % 3];
     }
-    if (shape_want == shape_now || (game_fight_on() && !anytime)) return 0;
-    fprintf(stderr, "[display] picture shape now %.4g (was %.4g)%s\n", shape_want, shape_now, game_fight_on() ? ", in a fight (SSBU_ASPECT_ANYTIME)" : "");
-    shape_now = shape_want;
+    int online = !display_shape_locked() && net_match_now();
+    float want = online ? 16.0f / 9 : shape_want;   /* (online matches: 16:9, owner 2026-11-11) */
+    if (want == shape_now || (game_fight_on() && !anytime)) return 0;
+    fprintf(stderr, "[display] picture shape now %.4g (was %.4g)%s%s\n", want, shape_now, online ? ", for an online match" : "",
+            game_fight_on() ? ", in a fight (SSBU_ASPECT_ANYTIME)" : "");
+    shape_now = want;
     return 1;
 }
 int display_view(void) { load(); return cfg.view; }

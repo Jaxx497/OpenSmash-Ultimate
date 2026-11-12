@@ -15,7 +15,7 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
 
 | Setting | What it does |
 | :--- | :--- |
-| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame with no fight running (picked in a fight, it waits for its end). Always 16:9 in a session started for online play (`--online`, `SSBU_RB_NET`) and with a renderer other than Direct3D 11. |
+| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame with no fight running (picked in a fight, it waits for its end). 16:9 while an online match is set up or under way (taken between fights, so before its GO!), and for the whole session with a renderer other than Direct3D 11. |
 | `display.ini` `view = wide \| zoomed \| hybrid` (`SSBU_VIEW` over it) | The view, with a picture wider than 16:9. Default hybrid. Also in the settings menu ("View"), at once, mid-fight too. |
 | `SSBU_GAME_FRAMING_WIDE=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
 | `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP` | Old tests. To remove. |
@@ -297,7 +297,13 @@ few seconds into a fight (16:9 too).
    (they are looked up by the game's address each time). Everything else reads the shape live: the
    camera's +0x164/+0x16c (written back to 1920 / 16:9 once when 16:9 returns, untouched before), the
    HUD wrappers (straight through at 16:9), the views (no offset at 16:9). The hooks are in whenever the
-   session may draw wider (not online, Direct3D 11). Known: the render scale's "auto" is fixed at the
+   session may draw wider (Direct3D 11).
+   Online matches: 16:9 (owner, 2026-11-11). First made per session (`--online`), but OpenSmash.exe
+   starts every session on the lobby, so that held offline fights at 16:9 too (owner's test). Now per
+   match: `net_match_on` (`hle_rb_core.c`: melee mode 14, a rollback-agreed Online or Local Wireless
+   match, a relay room's match, or being in a Local Wireless room with others), asked on the game's
+   thread at each frame end (it reads the lobby's room) and kept for the renderer, which takes 16:9 for
+   it like any shape change, between fights. Not yet seen in a real online match. Known: the render scale's "auto" is fixed at the
    start, from the shape then; the window keeps its size (the picture fits inside it, with bars).
 7. **Vulkan and Metal**: the same changes in the other renderers (Direct3D 11 only now; the others
    are held at 16:9). The camera and HUD work in `host.c` is shared but Windows-only (`#ifdef _WIN32`,
