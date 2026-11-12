@@ -60,7 +60,8 @@ The words used here (picture shape, wide / zoomed / hybrid view, stage range, ..
     full-screen pass has its clip-space x divided by the widening (`params.fix[0]`), so the HUD sits in
     the middle 16:9, scissored to it (the game's own scissor squeezed with it).
   - Magnifying bubbles: known by the portrait's vertex program and the two draws after it (ring, arrow),
-    moved to the picture's edge in the zoomed and hybrid views (HUD decisions).
+    moved to the picture's edge in the zoomed and hybrid views (HUD decisions), in a fight only: menus draw
+    replay thumbnails and selection frames with the same programs.
   - Research: `cam_hunt_cb`, the F9 picker, the `aspect:` line in F4's draw log.
 - `runtime/gpu_menu.c`: the settings menu's Picture shape and View rows (both take effect without a
   restart).

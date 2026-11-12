@@ -5860,7 +5860,9 @@ void d3d11_draw(const u32 *regs, const CbBinding cb[STAGES][18], int indexed) {
          * bubble at the picture's edge looks like the fighter jumped there (owner, 2026-11-11). */
         static int bubble_left;
         static float bubble_t;
-        if (!depth_on && aspect_native() && display_view() != VIEW_WIDE && cb[STAGE_VERTEX][3].address && cb[STAGE_VERTEX][3].size >= 0x60) {
+        /* (fights only: menus draw replay thumbnails and selection frames with the same programs, and the
+         * left tile sat where a bubble would - its frame was moved out to the picture's edge, owner 2026-11-12) */
+        if (!depth_on && aspect_native() && display_view() != VIEW_WIDE && game_fight_on() && cb[STAGE_VERTEX][3].address && cb[STAGE_VERTEX][3].size >= 0x60) {
             float row[8];
             read_gpu(cb[STAGE_VERTEX][3].address + 0x40, sizeof row, row);
             int portrait = vs && !strncmp(vs->name, "vs_545fbedf170d65dd", 19);
