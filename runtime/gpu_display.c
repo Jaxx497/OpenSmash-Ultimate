@@ -280,6 +280,7 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
         else if (!_stricmp(key, "aspect")) snprintf(cfg.aspect, sizeof cfg.aspect, "%s", value);
         else if (!_stricmp(key, "view")) parse_view(value, path);
         else if (!_stricmp(key, "volume")) {}   /* (the master volume: ipc_audio.c's audio_master_volume reads it) */
+        else if (!_stricmp(key, "language")) {}   /* (the game's language: hle_env.c reads it) */
         else fprintf(stderr, "[display] %s: unknown setting '%s'\n", path, key);
     }
     if (f) fclose(f);

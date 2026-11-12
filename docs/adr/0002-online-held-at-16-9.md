@@ -13,9 +13,11 @@ decide when that evidence is enough; there is no fixed number.
 ## How it is held
 
 Per match, not per session: OpenSmash.exe starts every session connected to the lobby, so a
-per-session lock held offline play at 16:9 too. A match counts as online when the game's melee mode is
-the online one, rollback has agreed an Online or Local Wireless match, a relay room's match is set up,
-or a Local Wireless room has other players (`net_match_on`, `hle_rb_core.c`). The shape goes to 16:9
+per-session lock held offline play at 16:9 too. A match counts as online when rollback has agreed an Online
+or Local Wireless match, a relay room's match is set up, a Local Wireless room has other players, or the
+game's melee mode is an online one (Online, Battle Arena) while the game is talking to other players;
+that mode stays set after the match, so without the players it no longer counts (`net_match_on`,
+`hle_rb_core.c`). The shape goes to 16:9
 before GO! and never changes inside an online fight, where a hitch would be both players'.
 
 ## The evidence

@@ -3371,7 +3371,12 @@ static int lw_room_others(u32 *out, int max) {
  * (Online or a Local Wireless room's), a relay room's, or any while this game is in a Local Wireless room with others. */
 int net_match_on(void) {
     u32 others[8];
-    return online_match || (net_mode == 2 && net_armed) || ld8(MELEE_INFO) == ONLINE_MELEE || lw_room_others(others, 8) > 0;
+    if (online_match || (net_mode == 2 && net_armed) || lw_room_others(others, 8) > 0) return 1;
+    /* The match block's melee mode stays an online one after the match, until the next set-up: it counts only
+     * while the game talks to other players (Pia, from the matchmaking on: well before GO!), so the hold ends
+     * at the menus once they are gone (15 s). */
+    u8 mode = ld8(MELEE_INFO);
+    return (mode == ONLINE_MELEE || mode == ARENA_MELEE) && net_recent_peers(others, 8, 15000) > 0;
 }
 static int online_setup(u64 st) {
     online_forget("a new match set-up");

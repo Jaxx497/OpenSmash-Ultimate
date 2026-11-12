@@ -24,9 +24,12 @@ Order agreed with the owner (2026-11-11): HUD work first, then the Vulkan port.
       (not while the window or its edge is being dragged: at the end of the drag).
 - [x] **Windowed: the window follows the shape**: same height, new width, around the same centre; shrunk to
       fit the monitor if wider.
-- [ ] **The online hold ends at the main menu** (now: menus can stay 16:9 after an online match until the
-      next offline match).
-- [ ] **Every display setting persists**: a check, row by row, that each one survives a restart.
+- [x] **The online hold ends at the main menu**: the match block's online melee mode (Online 14, Battle
+      Arena 20) counts only while the game talks to other players (15 s), so the menus go back to the
+      picture shape once they are gone. Not yet seen in a real online session.
+- [x] **Every display setting persists**: `tests/test_renderer_option.py` reads back every value the Display
+      page writes. Found: the launcher before upstream #318 wrote its old copy of the settings back when the
+      game closed, undoing the in-game menu's changes; fixed by the current launcher (not yet installed here).
 
 ## Experimental tab (the maintainer agreed to a new tab)
 
