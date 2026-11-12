@@ -9,9 +9,9 @@ Order agreed with the owner (2026-11-11): HUD work first, then the Vulkan port.
 
 ## Menu and settings
 
-- [ ] **"16:9 (original)"**: the 16:9 preset's label; help text "The game as made for 16:9. The View setting has no effect."
-- [ ] **View greyed at 16:9**: shown, with "only with a picture wider than 16:9".
-- [ ] **Presets snap to the monitor**: 21:9 and 43:18 take the monitor's exact shape when it is within
+- [x] **"16:9 (original)"**: the 16:9 preset's label; help text "The game as made for 16:9. The View setting has no effect."
+- [x] **View greyed at 16:9**: shown, with "only with a picture wider than 16:9".
+- [x] **Presets snap to the monitor**: 21:9 and 43:18 take the monitor's exact shape when it is within
       2.22-2.45 (2560x1080, 3440x1440, 3840x1600), 32:9 within 3.38-3.73; otherwise the preset's own
       shape. No bars in fullscreen inside those ranges; bars outside them are expected.
 - [ ] **Window size and render scale change without a restart**: at once offline; in an online match,

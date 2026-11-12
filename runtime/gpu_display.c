@@ -343,17 +343,27 @@ int display_shape_locked(void) {
     }
     return locked;
 }
-static float shape_of(const char *e) {
+/* The shape a setting names on a monitor of shape `monitor` (0: unknown). "21:9" is a name for several
+ * shapes (2560x1080 is 2.37, 3440x1440 2.39, true 21:9 2.33: docs/ULTRAWIDE-CONTEXT.md), so a shape in
+ * one of these ranges takes the monitor's own when that is in the same range: no bars in fullscreen. */
+static float shape_for(const char *e, float monitor) {
+    static const float RANGES[][2] = {{2.22f, 2.45f}, {3.38f, 3.73f}};   /* (the 21:9 class, the 32:9 class) */
     float a = 0, w, h;
-    if (!_stricmp(e, "auto")) {
-#ifdef _WIN32
-        int mw = GetSystemMetrics(SM_CXSCREEN), mh = GetSystemMetrics(SM_CYSCREEN);   /* ponytail: the primary monitor's; the window's own if that matters */
-        if (mw > 0 && mh > 0) a = (float)mw / (float)mh;
-#endif
-    } else if (sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
+    if (!_stricmp(e, "auto")) a = monitor;
+    else if (sscanf(e, "%f:%f", &w, &h) == 2 && h > 0) a = w / h;
     else a = (float)atof(e);
+    for (int i = 0; i < 2; i++)
+        if (a >= RANGES[i][0] && a <= RANGES[i][1] && monitor >= RANGES[i][0] && monitor <= RANGES[i][1]) a = monitor;
     if (a > 32.0f / 9) a = 32.0f / 9;
     return a > 16.0f / 9 + 1e-3f ? a : 16.0f / 9;
+}
+static float shape_of(const char *e) {
+    float monitor = 0;
+#ifdef _WIN32
+    int mw = GetSystemMetrics(SM_CXSCREEN), mh = GetSystemMetrics(SM_CYSCREEN);   /* ponytail: the primary monitor's; the window's own if that matters */
+    if (mw > 0 && mh > 0) monitor = (float)mw / (float)mh;
+#endif
+    return shape_for(e, monitor);
 }
 /* The shape drawn now, and the one asked for (the settings menu): the renderer takes it between two
  * frames (display_aspect_take). Offline at once, in fights too (only the picture changes: the fight is

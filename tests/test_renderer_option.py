@@ -63,6 +63,16 @@ class RendererOption(unittest.TestCase):
                                'parse DXVK -> 0 auto', 'parse metal -> 0 auto', 'parse auto -> 0 auto', 'parse direct3d11 -> 2 direct3d11',
                                'parse DX11 -> 2 direct3d11', 'parse opengl -> -1 -', 'parse  -> -1 -'])
 
+    def test_shape_takes_the_monitors_in_its_range(self):
+        """21:9 and 43:18 are the monitor's shape on any 21:9-class monitor (2.22-2.45), 32:9 on a 32:9-class one;
+        outside the range the setting's own shape (bars); never past 32:9, never below 16:9."""
+        out, _ = self.run_test('shape', '21:9', '2.3889', 'shape', '43:18', '2.3704', 'shape', '21:9', '1.7778',
+                               'shape', '32:9', '2.3889', 'shape', '32:9', '3.6', 'shape', 'auto', '2.3889', 'shape', '16:9', '2.3889',
+                               'shape', '21:9', '3.7')
+        self.assertEqual(out, ['shape 21:9 2.3889 -> 2.389', 'shape 43:18 2.3704 -> 2.370', 'shape 21:9 1.7778 -> 2.333',
+                               'shape 32:9 2.3889 -> 3.556', 'shape 32:9 3.6 -> 3.556', 'shape auto 2.3889 -> 2.389',
+                               'shape 16:9 2.3889 -> 1.778', 'shape 21:9 3.7 -> 2.333'])
+
     def test_default_is_unchanged(self):
         """No renderer key, or the default's name: auto (gpu_backend.c's choice, not made here: Direct3D 11 starts),
         and the start says nothing."""

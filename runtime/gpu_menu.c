@@ -921,18 +921,22 @@ static void build(void)
         else
             snprintf(r->value, sizeof r->value, "%g", ds.render_scale);
         note_env(r, "SSBU_RENDER_SCALE");
+        int original = !_stricmp(display_aspect_setting(), "16:9"), locked = display_shape_locked();
         r = add(R_ASPECT, K_CHOICE, W_NOW, "Picture shape",
-                "16:9 is the game's own. Wider (21:9, 32:9, or auto: the monitor's, up to 32:9) shows the fight wider without stretching it; "
-                "the fight itself stays what 16:9 has. The HUD stays in the middle. Online matches: 16:9.");
-        snprintf(r->value, sizeof r->value, "%s", display_aspect_setting());
+                "16:9 (original): the game as made for 16:9. Wider shows the fight wider without stretching it; the fight itself stays "
+                "what 16:9 has, and the HUD stays in the middle. 21:9 and 43:18 take your monitor's exact shape on any 21:9 monitor, "
+                "32:9 on any 32:9 one; auto is always the monitor's. Online matches: 16:9. Needs the Direct3D 11 renderer for now.");
+        snprintf(r->value, sizeof r->value, "%s%s", display_aspect_setting(), original ? " (original)" : "");
+        if (locked && !original) snprintf(r->note, sizeof r->note, "Direct3D 11 only");
         note_env(r, "SSBU_ASPECT");
-        r = add(R_VIEW, K_CHOICE, W_NOW, "View (wider pictures)",
-                "wide: the 16:9 view with the sides added (it can show past the stage). zoomed: the fight framed for the wider picture, "
-                "closer and kept on the stage. hybrid: wide, zoomed in just enough to keep the picture on the stage.");
+        r = add(R_VIEW, original || locked ? K_INFO : K_CHOICE, W_NOW, "View (wider pictures)",
+                "wide: the game's own camera with the sides added (it can show past the stage). zoomed: the fight framed for the wider "
+                "picture, closer and kept on the stage. hybrid: wide, zoomed in just enough to keep the picture on the stage.");
         {
             int v = display_view();
             snprintf(r->value, sizeof r->value, "%s", v == VIEW_WIDE ? "wide" : v == VIEW_ZOOMED ? "zoomed" : "hybrid");
         }
+        if (original || locked) snprintf(r->note, sizeof r->note, "only wider than 16:9");
         note_env(r, "SSBU_VIEW");
 #ifdef _WIN32
         r = add(R_GPU, K_CHOICE, W_RESTART, "Graphics card", "Auto picks the fastest card (on a laptop, the NVIDIA or AMD one). Pick another to use it instead.");
