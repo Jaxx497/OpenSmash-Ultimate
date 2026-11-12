@@ -56,6 +56,9 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 ## Bugs to reproduce
 
 - [ ] **Training mode camera stretches** in a wider picture (owner's test).
+- [ ] **A menu's selection frame strays into the side area** (owner, 2026-11-12, 32:9, Vault > Replays >
+      Replay Data): the yellow highlight box of the screen before is drawn at the far left of the picture,
+      outside the middle 16:9, as if not squeezed (a menu draw with depth testing on, taken for 3D?).
 - [ ] **Pause camera jumps** (owner, 2026-11-12, 32:9 zoomed, Bridge of Eldin): pausing moves the camera
       to the game's pause shot from where the game's own 16:9 camera is, not from the picture's camera,
       so the picture jumps. The pause shot should start from the view the picture shows. Also: the pause
