@@ -8,14 +8,14 @@ Goals agreed with the owner: the fight must stay exactly what 16:9 computes (onl
 stays in the middle 16:9, unstretched; the P1/CPU tags and the magnifying glasses sit on their fighters;
 the camera should feel like 16:9's (centred, pulling in, not showing much past the stage).
 
-## Settings and switches (Direct3D 11 only)
+## Settings and switches (Direct3D 11 only: `renderer = direct3d11`)
 
 The words used here (picture shape, wide / zoomed / hybrid view, stage range, ...) are defined in
 [ULTRAWIDE-CONTEXT.md](ULTRAWIDE-CONTEXT.md).
 
 | Setting | What it does |
 | :--- | :--- |
-| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame, in fights too. 16:9 while an online match is set up or under way (taken before its GO!, never inside an online fight), and for the whole session with a renderer other than Direct3D 11. |
+| `display.ini` `aspect = 16:9 \| auto \| W:H` (`SSBU_ASPECT` over it) | The picture shape, at most 32:9. 16:9 (the default): nothing changes. auto: the primary monitor's. Also in the settings menu ("Picture shape"): taken at the next frame, in fights too. 16:9 while an online match is set up or under way (taken before its GO!, never inside an online fight), and for the whole session unless `renderer = direct3d11` (auto draws with Vulkan on AMD, NVIDIA and Intel cards, not ported yet). |
 | `display.ini` `view = wide \| zoomed \| hybrid` (`SSBU_VIEW` over it) | The view, with a picture wider than 16:9. Default hybrid. Also in the settings menu ("View"), at once, mid-fight too. |
 | `SSBU_GAME_FRAMING_WIDE=1` | The reference view: tells the game itself the picture shape. Changes fights: offline comparison only (`build\aspect_test\liked.bat`). |
 | `SSBU_ASPECT_HYBRID`, `SSBU_ASPECT_SCREEN`, `SSBU_NO_2D_CLAMP` | Old tests. To remove. |

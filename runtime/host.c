@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #include "host.h"
+char rt_romfs_warning[320];   /* (hle_fs.c fills it: unconfirmed game data, for crash reports) */   /* (every platform) */
 #include "clock.h"
 #include "display.h"
 #include "hookable.h"
@@ -76,8 +77,8 @@ void movie_test_start(void);   /* (hle_movie_skip.c) SSBU_SKIP_MOVIES, SSBU_SEQ'
 void test_fight_start(void);   /* (hle_fight_test.c) SSBU_FIGHT_HASH, SSBU_DETERMINISTIC, SSBU_DEBUG_MATCH... */
 void gfx_report_compiles(void (*line)(const char *text));
 void gfx_status_lines(void);
-#ifdef _WIN32
-int gfx_warm_shaders_main(const char *dir, const char *luid);   /* (gpu_d3d11.c: ssbu --warm-shaders) */
+#if defined(_WIN32) || defined(__linux__)
+int gfx_warm_shaders_main(const char *dir, const char *arg);   /* (gpu_d3d11.c: ssbu --warm-shaders) */
 #endif
 const char *rt_data_dir;
 /* This thread is reading another thread's stack (debug_profile.c): a fault there is expected and
@@ -1049,6 +1050,7 @@ static _Noreturn void crash_report(EXCEPTION_POINTERS *e, DWORD tid) {
         out(": %s address %s", e->ExceptionRecord->ExceptionInformation[0] == 8 ? "executing" : e->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading",
             rt_describe(e->ExceptionRecord->ExceptionInformation[1], name, sizeof name));
     out("\n");
+    if (rt_romfs_warning[0]) out("%s\n", rt_romfs_warning);   /* (hle_fs.c: wrong game data can be the cause) */
     /* (an address in guest memory that is not mapped: what the kernel's map says, and its recent changes there - the
      * r9n_1 crash, an alias address read on the character select screen while not committed) */
     u64 fault_addr = code == EXCEPTION_ACCESS_VIOLATION ? (u64)e->ExceptionRecord->ExceptionInformation[1] : 0;
@@ -1296,6 +1298,7 @@ static void on_fault(int sig, siginfo_t *si, void *ucv) {
     if (sig == SIGSEGV || sig == SIGBUS) out(": %s address %s", writing ? "writing" : "reading", rt_describe(addr, name, sizeof name));
 #endif
     out("\n");
+    if (rt_romfs_warning[0]) out("%s\n", rt_romfs_warning);   /* (hle_fs.c: wrong game data can be the cause) */
     out("host pc %#llx (thread %d %s):\n", pc, (int)me, rt_thread_description(me));
     host_frame("  ", (void *)pc);
     void *frames[64];
@@ -1352,6 +1355,7 @@ _Noreturn void rt_fatal(const char *fmt, ...) {
     va_end(ap);
     report_open("stopped", report, sizeof report);
     out("\n*** stopped during %s: %s\n", phase, text);
+    if (rt_romfs_warning[0]) out("%s\n", rt_romfs_warning);
     rt_backtrace();
     report_close(report);
     fflush(stderr);
@@ -1757,15 +1761,15 @@ static void load_plugin_dlls(void) {
             fprintf(stderr, "[plugins] %s did not load (error %lu)\n", full, (unsigned long)GetLastError());
             continue;
         }
-        void (*bind)(GuestFn *(*)(u64), GuestFn *(*)(u64, RtCache *), void (*)(Cpu *, u64, const char *)) =
-            (void *)GetProcAddress(lib, "ssbu_plugin_bind");
+        void (*bind)(GuestFn *(*)(u64), GuestFn *(*)(u64, RtCache *), void (*)(Cpu *, u64, const char *),
+                     void (*)(Cpu *, u32)) = (void *)GetProcAddress(lib, "ssbu_plugin_bind");
         const RtModule *(*modfn)(void) = (void *)GetProcAddress(lib, "ssbu_plugin_module");
         if (!bind || !modfn) {
             fprintf(stderr, "[plugins] %s has no plugin entry\n", full);
             FreeLibrary(lib);
             continue;
         }
-        bind(rt_lookup, rt_lookup_cached, rt_trap);
+        bind(rt_lookup, rt_lookup_cached, rt_trap, rt_svc);   /* (a DLL built before rt_svc ignores the 4th) */
         const RtModule *mod = modfn();
         if (!mod || nro_linked(mod)) {
             FreeLibrary(lib);
@@ -2307,7 +2311,10 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     if (argc == 2 && !strcmp(argv[1], "--yuzu-client-check")) { puts("yuzu-room-client protocol=1"); return 0; }
     if (argc >= 6 && !strcmp(argv[1], "--write-dump")) return write_dump_main(argv);
-    if (argc >= 4 && !strcmp(argv[1], "--warm-shaders")) return gfx_warm_shaders_main(argv[2], argv[3]);
+    if (argc >= 3 && !strcmp(argv[1], "--warm-shaders")) return gfx_warm_shaders_main(argv[2], argc >= 4 ? argv[3] : "");
+#elif defined(__linux__)
+    /* (macOS has no --warm-shaders pass: Metal's prewarm is gpu_metal.m's, at the game's start) */
+    if (argc >= 3 && !strcmp(argv[1], "--warm-shaders")) return gfx_warm_shaders_main(argv[2], argc >= 4 ? argv[3] : "");
 #endif
 #ifdef __APPLE__
     mac_start(argc, argv, &dir, &options);

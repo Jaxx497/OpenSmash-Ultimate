@@ -2,7 +2,7 @@
 """Compile the game's shaders ahead of time, into the renderer's disk cache.
 
 Usage:
-  shader_aot.py [--jobs N] [--dry] [--parts]
+  shader_aot.py [--jobs N] [--dry] [--parts] [--no-warm] [--rewarm]
   shader_aot.py --files <file or folder>... [--tree <dir>] [--warm] [--jobs N]
 
 --files takes the programs of loose files instead of data.arc's: .eff, .nushdb and .arc files, or
@@ -26,6 +26,15 @@ The files are dated 2001-01-01 until the game first uses them, so the start's pr
 makes the shaders the game has used. Programs with indirect branches are left out (their key
 depends on a draw's constant buffers), as are compute programs (on their launch's size).
 --dry translates without compiling and compares the keys with the cache that is there.
+
+On Linux, after a successful compile, the cache is drawn once by the game itself
+(build-linux/ssbu --warm-shaders dump/shadercache): DXVK then makes each Vulkan pipeline and the
+Vulkan driver compiles its GPU code, so the first use in a game does not have to (on Windows the
+game draws the cache for AMD's driver itself, when it closes: runtime/gpu_d3d11.c, "first draws").
+It is skipped with --no-warm. It draws what warm.done says an earlier run has not; warm.done is
+keyed by this game and the graphics driver, so a Mesa, RADV, DXVK or other driver update (which
+may empty those caches) draws everything again by itself. --rewarm forces that. A warm pass that fails (no GPU, say) is reported, but does not fail the
+compile: the game still works as without it.
 
 How the work is shared out: one discovery pass (shaderaot --dry) lists every key once; the
 keys not in the cache yet go into one queue, longest compile first (by the times recorded in
@@ -366,11 +375,13 @@ def default_jobs():
     return jobs
 
 
-# (Windows priority class, Linux nice). High is above normal, not real-time: the installer stays usable.
+# (Windows priority class, Linux nice). Never above normal: high was Windows' high class on every core, which left
+# nothing to the launcher's window (its bar stayed at 0 while the shaders compiled) or to a game started meanwhile
+# (it stopped as Direct3D started, on a 4-core laptop). High is every core at normal priority instead.
 _PRIORITY = {
     "low": (0x00004000, 10),
     "medium": (0x00000020, 0),
-    "high": (0x00008000, -5),
+    "high": (0x00000020, 0),
 }
 
 
@@ -413,12 +424,61 @@ def jobs_for(priority, jobs):
     return default_jobs()
 
 
+def warm_shaders(cache, rewarm):
+    """Linux: draw every shader of the cache once through DXVK (ssbu --warm-shaders). DXVK and the
+    Vulkan driver then have each program's pipeline and GPU code before the game first uses it.
+    Its lines ([warm] ...) go to this console as they come; True when it warmed."""
+    exe = os.path.join(ROOT, "build-linux", "ssbu")
+    what = "DXVK/Vulkan"
+    if not os.path.isfile(exe):
+        print(f"warm: skipped: {os.path.relpath(exe, ROOT)} is not there (build the game first); the cache is compiled, "
+              "and the game will make the driver's code as it first uses each shader", flush=True)
+        return False
+    cmd = [exe, "--warm-shaders", cache] + (["rewarm"] if rewarm else [])
+    print(f"warm: drawing the cache once through {what} so the first use does not compile it"
+          + (" (rewarm: every shader again)" if rewarm else ""), flush=True)
+    try:
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, **low_priority())
+    except OSError as e:
+        print(f"warm: not warmed: cannot start {os.path.relpath(exe, ROOT)}: {e}", flush=True)
+        return False
+    try:
+        for line in proc.stdout:
+            line = line.rstrip()
+            # (DXVK's device setup logs at info level: keep the console to the warm progress,
+            # its warnings and errors, not a page for each of its threads' devices)
+            if line.startswith(("[warm]", "warm:", "[gfx]", "warn:", "err:")):
+                print(line, flush=True)
+        code = proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        try:
+            proc.wait(10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print("warm: stopped; the compiled shaders are kept", flush=True)
+        return False
+    if code:
+        print(f"warm: not warmed (the warm pass stopped with code {code}); the compiled shaders are kept, "
+              "and the game will make the driver's code as it first uses each shader", flush=True)
+        return False
+    print(f"warm: warmed: {what}'s pipelines and the driver's GPU code are in their caches", flush=True)
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--priority", choices=("low", "medium", "high"), default="low")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--parts", action="store_true", help="split the keys between the processes by hash (the older way)")
+    warm_args = ap.add_mutually_exclusive_group()
+    warm_args.add_argument("--no-warm", action="store_true",
+                           help="do not draw the cache through the graphics driver after compiling")
+    warm_args.add_argument("--rewarm", action="store_true",
+                           help="draw every shader through the driver again, even ones warm.done has "
+                                "(a driver update does this by itself)")
     ap.add_argument("--files", nargs="+", help="loose .eff/.nushdb/.arc files or folders instead of data.arc")
     ap.add_argument("--tree", default=ROOT, help="with --files: the tree whose dump/shadercache gets the files")
     ap.add_argument("--warm", action="store_true", help="with --files: date their cache files now (the start's prewarm makes them)")
@@ -475,7 +535,18 @@ def main():
     if not a.dry and ok:
         with open(marker, "w", encoding="utf-8", newline="\n") as f:
             f.write(f"version {cache_version()}\n")
-    print(f"done in {time.time() - t0:.0f} s")
+    state = "skipped"
+    if a.dry:
+        print("warm: skipped (--dry)", flush=True)
+    elif not ok:
+        print("warm: skipped: the compile did not finish", flush=True)
+    elif not LINUX:
+        print("warm: on Windows the game draws the cache for AMD's driver when it closes", flush=True)
+    elif a.no_warm:
+        print("warm: skipped (--no-warm): the game makes the driver's pipeline and GPU code at first use", flush=True)
+    else:
+        state = "warmed" if warm_shaders(cache, a.rewarm) else "not warmed"
+    print(f"done in {time.time() - t0:.0f} s; driver cache {state}")
     return 0
 
 
@@ -598,7 +669,7 @@ def run_queue(exe, pack, cache, jobs, dry):
             if kept:
                 print(f"compile times kept for {kept[-1]:,} shaders ({os.path.join(os.path.relpath(times_dir, ROOT), TIMES_FILE)})", flush=True)
         try:
-            totals.update(serve(exe, pack, cache, todo, jobs, times, Progress(sys.stdout, window=None), save=save))
+            totals.update(serve(exe, pack, cache, todo, jobs, times, Progress(sys.stdout, window=None), save=save, paused=game_running))
         except KeyboardInterrupt:
             print("\n" + STOPPED)
             kept_said()
@@ -823,6 +894,26 @@ class Worker:
             pass
 
 
+GAME_RUNNING = "Local\\ssbu-game-running"   # (runtime/gpu_d3d11.c WARM_GAME: the game holds it while it runs)
+PAUSE_POLL = 1.0   # seconds between looks at whether the game still runs
+
+
+def game_running():
+    """Whether the game runs (Windows: its mutex is there). The compile pauses meanwhile: its workers on
+    every core left the game nothing as it started."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenMutexW.restype = ctypes.c_void_p
+    k.OpenMutexW.argtypes = (ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p)
+    k.CloseHandle.argtypes = (ctypes.c_void_p,)
+    h = k.OpenMutexW(0x00100000, 0, GAME_RUNNING)   # (SYNCHRONIZE)
+    if h:
+        k.CloseHandle(h)
+    return bool(h)
+
+
 def offer(worker, todo):
     """The queue's next key to the worker; False when the queue is empty or the worker is gone."""
     try:
@@ -837,11 +928,13 @@ def offer(worker, todo):
     return True
 
 
-def feed(worker, todo, report):
+def feed(worker, todo, report, paused=None):
     """(a thread) The worker's share of the queue: whatever is next, once it has answered its last,
     until the queue is empty. report(key, outcome, ms) for each answer; a worker that stops with a
-    key pending reports it as "died"."""
+    key pending reports it as "died". While paused() (the game runs) it sends no new key."""
     while True:
+        while paused and not worker.pending and not todo.empty() and paused():
+            time.sleep(PAUSE_POLL)
         while len(worker.pending) < Worker.IN_FLIGHT and offer(worker, todo):
             pass
         if not worker.pending:
@@ -858,13 +951,15 @@ def feed(worker, todo, report):
     worker.close()
 
 
-def serve(exe, pack, cache, todo, jobs, times, show, every=1.0, popen=None, out=None, save=None, save_every=30.0):
+def serve(exe, pack, cache, todo, jobs, times, show, every=1.0, popen=None, out=None, save=None, save_every=30.0, paused=None):
     """The keys compiled by `jobs` workers pulling from one queue, the progress shown through
     `show` ([(done, of)], work=(done, of) in compile time, by weights()) and the compiler's
     failures printed to `out`; compile times recorded in `times`, and given to save(times, last)
     every save_every seconds and once at the end - from a thread of its own, which a Ctrl+C (a
     KeyboardInterrupt lands in the main thread alone, and twice when pressed twice) cannot cut
-    short: the last save is waited for before the interrupt goes on. Returns the outcomes counted."""
+    short: the last save is waited for before the interrupt goes on. While paused() (game_running)
+    no new key is sent, said once on `out` when it pauses and once when it goes on. Returns the
+    outcomes counted."""
     out = out or sys.stdout
     popen = popen or (lambda: subprocess.Popen(tool_command(exe, pack, cache, "--serve"), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE, text=True, bufsize=1, **low_priority()))
@@ -905,7 +1000,8 @@ def serve(exe, pack, cache, todo, jobs, times, show, every=1.0, popen=None, out=
     saver = threading.Thread(target=saving) if save else None
     workers = [Worker(p) for p in procs]   # (each is given one key, and its next once that is answered: longest
                                            # first, so the longest compiles go to as many workers as there are)
-    feeders = [threading.Thread(target=feed, args=(w, q, report), daemon=True) for w in workers]
+    feeders = [threading.Thread(target=feed, args=(w, q, report, paused), daemon=True) for w in workers]
+    was_paused = False
     try:
         if saver:
             saver.start()
@@ -913,7 +1009,14 @@ def serve(exe, pack, cache, todo, jobs, times, show, every=1.0, popen=None, out=
             t.start()
         while any(t.is_alive() for t in feeders):
             show([(done[0], len(todo))], work=(work[0], work_of))
+            now_paused = bool(paused and not q.empty() and paused())
+            if now_paused != was_paused:
+                print("paused: the game is running; the compile goes on when it closes" if now_paused
+                      else "the game has closed: the compile goes on", file=out, flush=True)
+                was_paused = now_paused
             time.sleep(every)
+        if was_paused:   # (the workers all finished between two looks: the game had closed)
+            print("the game has closed: the compile goes on", file=out, flush=True)
         for w in workers:
             w.proc.wait()
             w.drain.join()
@@ -964,9 +1067,12 @@ def share(done, of, work=None):
 
 class Progress:
     """Shows the progress (the parts' combined, or the queue's): one line drawn over itself in a
-    console, else a line every percent (for a log, and the launcher's bar)."""
+    console, else a line every percent (for a log, and the launcher's bar), and one at least every
+    LOG_EVERY seconds the count has moved: by work, the queue's first percent is its longest
+    compiles, which a 4-core PC takes many minutes over (the launcher said "0 of 65,189" meanwhile)."""
 
-    WINDOW = 120   # seconds of recent pace the time left goes by (the parts' pace picks up after the start);
+    LOG_EVERY = 5.0   # seconds: the longest a log goes without a line while shaders are being done
+    WINDOW = 120  # seconds of recent pace the time left goes by (the parts' pace picks up after the start);
                    # None for the pace since the start (the queue's, by work: steadier than a window a long compile lands in)
 
     def __init__(self, out, console=None, window=WINDOW):
@@ -977,6 +1083,8 @@ class Progress:
         self.ready_said = False
         self.shown = -1     # (the last percent a log line was written for)
         self.last = None
+        self.last_at = None   # (when the last log line was written, and its count)
+        self.last_done = None
         self.width = 0
 
     def rate(self, now, done):
@@ -1004,10 +1112,12 @@ class Progress:
         else:
             wdone, wof = work if work and work[1] else (done, of)
             step = int(min(100, 100 * wdone // wof)) if wof else 100   # (100 * done // of: exact for counts)
-            if step > self.shown or (final and text != self.last):
+            moved = self.last_at is not None and done != self.last_done and now - self.last_at >= self.LOG_EVERY
+            if step > self.shown or (final and text != self.last) or moved:
                 self.out.write(text + "\n")
                 self.out.flush()
                 self.shown, self.last = step, text
+                self.last_at, self.last_done = now, done
 
 
 def follow(procs, show, every=1.0):

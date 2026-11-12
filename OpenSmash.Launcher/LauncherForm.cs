@@ -54,7 +54,7 @@ namespace OpenSmash.Launcher
         readonly string _iniPath;
         readonly string _statePath;
         readonly string _pluginsPath;
-        readonly string _pythonExe;
+        string _pythonExe;
 
         readonly ResolutionSetting _resolutionSetting = new ResolutionSetting();
 
@@ -68,6 +68,7 @@ namespace OpenSmash.Launcher
         bool _modsBusy;
         bool _startingPlay;
         string _pluginBuildReason = "";
+        string _vanillaBuildReason = "";   // (os_mods status: needs_build_vanilla, the link Play without mods needs)
         readonly Dictionary<string, Image> _modThumbs = new();
         readonly HashSet<string> _openGroups = new();
         readonly HashSet<string> _knownGroups = new();
@@ -81,6 +82,7 @@ namespace OpenSmash.Launcher
         bool _keys = false;
         int _modScroll = 0;
         Dictionary<string, string> _iniValues = new();
+        readonly HashSet<string> _changed = new();   // settings changed here since ReadSettings: the only ones written
 
         // WebView2 for MOSAIC marketplace
         WebView2 _marketplaceWebView;
@@ -95,7 +97,7 @@ namespace OpenSmash.Launcher
         string _setupLog = "";
         string _setupMode = ""; // "scratch" or "import"
 
-        // Play (mods, ssbu_sky.exe) or Vanilla (ssbu_native.exe, plugins off). Remembered in build\launch_mode.txt.
+        // Play (mods) or Vanilla (the game's own data and no mods: mods.play_vanilla); both start build\ssbu.exe. Remembered in build\launch_mode.txt.
         string _launchMode = "mods";
         Task<bool> _prepInflight;   /* mod convert + hook install, shared by launcher startup and Play */
         bool _playQueued;
@@ -272,6 +274,7 @@ namespace OpenSmash.Launcher
             Shown += async (s, e) =>
             {
                 AskShadersIfNeeded();
+                _ = EnsureOwnPythonAsync();   // (not awaited: the launcher does not wait for pip, nor stop if it fails)
                 UpdateMods();
                 ScanForNewMods();
                 _ = CheckUpdatesAtBootAsync();
@@ -625,6 +628,54 @@ namespace OpenSmash.Launcher
             return text.Length <= 180 ? text : text.Substring(0, 177) + "\u2026";
         }
 
+        // The tools' own Python (deps\venv): an install from before it has none, one whose venv's Python was
+        // uninstalled has one that no longer runs, and one whose pip failed (offline) has no packages. The installer's
+        // Python step makes it or adds them (tools\install_windowsmash.ps1 -PythonOnly); a PC with deps\python (it had
+        // no Python) keeps that.
+        async Task EnsureOwnPythonAsync()
+        {
+            // (an install on a Python of the PC's keeps it until deps\venv has its packages: .opensmash-ready)
+            try
+            {
+                string ready = Path.Combine(_repo, "deps", "venv", ".opensmash-ready");
+                string bundled = Path.Combine(_repo, "deps", "python", "python.exe");
+                bool ok = await Task.Run(() => File.Exists(ready) || (File.Exists(bundled) && PythonHasPackages(bundled)));
+                if (!ok) await RunPythonStepAsync("SETTING UP PYTHON");
+            }
+            catch { }
+        }
+
+        async Task RunPythonStepAsync(string label)
+        {
+            string script = Path.Combine(_repo, "tools", "install_windowsmash.ps1");
+            if (!File.Exists(script)) return;
+            SetLoad(label, -1);
+            try
+            {
+                var r = await Task.Run(() => RunPowerShellUpdate(script, "-PythonOnly"));
+                if (r.Code != 0) try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "os_update.log"), r.Output + "\n---\n"); } catch { }
+            }
+            catch { }
+            finally { ClearLoad(); }
+            _pythonExe = ModManagerProcess.FindPython(_repo, _buildDir);
+        }
+
+        // (pycryptodomex alone: pip installs requirements.txt all at once or not at all)
+        static bool PythonHasPackages(string exe)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo { FileName = exe, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                psi.ArgumentList.Add("-c"); psi.ArgumentList.Add("import Cryptodome");
+                using var p = Process.Start(psi);
+                if (p == null) return false;
+                _ = p.StandardOutput.ReadToEndAsync(); _ = p.StandardError.ReadToEndAsync();
+                if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return false; }
+                return p.ExitCode == 0;
+            }
+            catch { return false; }
+        }
+
         async Task CheckUpdatesAtBootAsync()
         {
             await Task.Delay(1600);
@@ -811,6 +862,7 @@ namespace OpenSmash.Launcher
                 var result = await Task.Run(() => RunPowerShellUpdate(script));
                 output = result.Output;
                 if (result.Code != 0) why = "The updater stopped (exit " + result.Code + ").";
+                else await RunPythonStepAsync("UPDATING PYTHON PACKAGES");   // (an update can need a new package)
             }
             catch (Exception ex) { why = ex.Message; }
             finally
@@ -843,7 +895,7 @@ namespace OpenSmash.Launcher
             Invalidate();
         }
 
-        static (int Code, string Output) RunPowerShellUpdate(string script)
+        static (int Code, string Output) RunPowerShellUpdate(string script, string only = "-UpdateOnly")
         {
             string root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(script)!, ".."));
             var psi = new ProcessStartInfo
@@ -862,7 +914,7 @@ namespace OpenSmash.Launcher
             psi.ArgumentList.Add("Bypass");
             psi.ArgumentList.Add("-File");
             psi.ArgumentList.Add(script);
-            psi.ArgumentList.Add("-UpdateOnly");
+            psi.ArgumentList.Add(only);
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("Could not start PowerShell.");
             var stdout = p.StandardOutput.ReadToEndAsync();
             var stderr = p.StandardError.ReadToEndAsync();
@@ -879,6 +931,7 @@ namespace OpenSmash.Launcher
             bool parsed = false;
             bool modded = _modsModded;
             string reason = _pluginBuildReason;
+            string vanillaReason = _vanillaBuildReason;
             string refresh = _pluginRefreshReason;
             string json = "";
             try
@@ -890,6 +943,7 @@ namespace OpenSmash.Launcher
                     var root = doc.RootElement;
                     modded = root.TryGetProperty("modded", out var md) && md.ValueKind == JsonValueKind.True;
                     reason = root.TryGetProperty("needs_build", out var nb) ? nb.GetString() ?? "" : "";
+                    vanillaReason = root.TryGetProperty("needs_build_vanilla", out var nv) ? nv.GetString() ?? "" : reason;   // (older tools: needs_build)
                     refresh = root.TryGetProperty("needs_refresh", out var nr) ? nr.GetString() ?? "" : "";
                     if (root.TryGetProperty("plugins", out var plugins) && plugins.ValueKind == JsonValueKind.Array)
                     {
@@ -964,6 +1018,7 @@ namespace OpenSmash.Launcher
             if (!parsed) return;
             _modsModded = modded;
             _pluginBuildReason = reason;
+            _vanillaBuildReason = vanillaReason;
             _pluginRefreshReason = refresh;
             _stdPlugins = pluginsSeen;
             foreach (string old in _modThumbs.Keys.Where(k => !keep.Contains(k)).ToList())
@@ -1266,6 +1321,7 @@ namespace OpenSmash.Launcher
         void ReadSettings()
         {
             _iniValues.Clear();
+            _changed.Clear();
             string display = WindowSmash.ConfigFile(_repo, "display.ini");
             string pads = WindowSmash.ConfigFile(_repo, "controllers.ini");
             string D(string key, string fallback) => IniValue(display, "", key) ?? fallback;
@@ -1355,7 +1411,9 @@ namespace OpenSmash.Launcher
         void CommitEdit()
         {
             if (_editingKey == null || _settingEdit == null || !_settingEdit.Visible) return;
-            _iniValues[_editingKey] = _settingEdit.Text.Trim();
+            string typed = _settingEdit.Text.Trim();
+            if (_iniValues.GetValueOrDefault(_editingKey, "") != typed) _changed.Add(_editingKey);
+            _iniValues[_editingKey] = typed;
             _settingEdit.Visible = false;
             _editingKey = null;
             Invalidate();
@@ -1380,11 +1438,14 @@ namespace OpenSmash.Launcher
         void WriteSetting(string key, string value)
         {
             _iniValues[key] = value;
+            _changed.Add(key);
             if (key == "window_size" && value.Contains('x'))
             {
                 var parts = value.Split('x');
                 _iniValues["width"] = parts[0];
                 _iniValues["height"] = parts[1];
+                _changed.Add("width");
+                _changed.Add("height");
             }
             PersistSettings();
         }
@@ -1416,22 +1477,26 @@ namespace OpenSmash.Launcher
                 "custom" => (host == "" ? "127.0.0.1:39420" : host) + (code == "" ? "" : " " + code),
                 _ => "auto"   // (the nearest public lobby: Europe or North America, runtime/net_relay.c)
             };
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "window", _iniValues.GetValueOrDefault("window", "windowed"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "width", _iniValues.GetValueOrDefault("width", "1280"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "height", _iniValues.GetValueOrDefault("height", "720"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "pacing", _iniValues.GetValueOrDefault("pacing", "clock"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "render_scale", _iniValues.GetValueOrDefault("render_scale", "1"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "gpu", _iniValues.GetValueOrDefault("gpu", "auto"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "renderer", _iniValues.GetValueOrDefault("renderer", "auto"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "hide_cursor", _iniValues.GetValueOrDefault("hide_cursor", "1"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "overlay", _iniValues.GetValueOrDefault("overlay", "1"));
-            SetIni(WindowSmash.ConfigFile(_repo, "display.ini"), "", "volume", _iniValues.GetValueOrDefault("volume", "100"));
-            SetIni(WindowSmash.ConfigFile(_repo, "controllers.ini"), "general", "keyboard_player", _iniValues.GetValueOrDefault("keyboard_player", "1"));
-            SetIni(WindowSmash.ConfigFile(_repo, "controllers.ini"), "general", "background", _iniValues.GetValueOrDefault("background", "1"));
-            if (serverReady)
+            // Only what was changed here since the files were read: the game's own settings menu (Esc)
+            // writes these files too, while this window waits hidden for the game to close - writing
+            // every value back when it closed put the game's changes (the renderer, the window...) back
+            // to what they were before the game started.
+            string display = WindowSmash.ConfigFile(_repo, "display.ini"), pads = WindowSmash.ConfigFile(_repo, "controllers.ini");
+            foreach (var (key, fallback) in new[] { ("window", "windowed"), ("width", "1280"), ("height", "720"), ("pacing", "clock"),
+                                                    ("render_scale", "1"), ("gpu", "auto"), ("renderer", "auto"), ("hide_cursor", "1"),
+                                                    ("overlay", "1"), ("volume", "100") })
+                if (_changed.Contains(key)) SetIni(display, "", key, _iniValues.GetValueOrDefault(key, fallback));
+            foreach (var (key, fallback) in new[] { ("keyboard_player", "1"), ("background", "1") })
+                if (_changed.Contains(key)) SetIni(pads, "general", key, _iniValues.GetValueOrDefault(key, fallback));
+            bool serverChanged = _changed.Contains("lobby") || _changed.Contains("code") || _changed.Contains("server");
+            if (serverReady && serverChanged)
                 SetFirstLine(WindowSmash.ConfigFile(_repo, "online_server.txt"), server);
-            SetFirstLine(WindowSmash.ConfigFile(_repo, "online_name.txt"), _iniValues.GetValueOrDefault("name", "").Trim());
-            SetFirstLine(WindowSmash.ConfigFile(_repo, "online_direct.txt"), _iniValues.GetValueOrDefault("direct", "on"));
+            if (_changed.Contains("name"))
+                SetFirstLine(WindowSmash.ConfigFile(_repo, "online_name.txt"), _iniValues.GetValueOrDefault("name", "").Trim());
+            if (_changed.Contains("direct"))
+                SetFirstLine(WindowSmash.ConfigFile(_repo, "online_direct.txt"), _iniValues.GetValueOrDefault("direct", "on"));
+            _changed.Clear();   // (written: the game's later changes stay)
+            if (serverChanged && !serverReady) { _changed.Add("lobby"); _changed.Add("code"); _changed.Add("server"); }
             string launcherIni = WindowSmash.ConfigFile(_repo, "launcher.ini");
             SetIni(launcherIni, "opensmash", "lobby", lobby);
             SetIni(launcherIni, "opensmash", "code", code);
@@ -1561,6 +1626,7 @@ namespace OpenSmash.Launcher
                 int val = (int)Math.Round(frac * 100f);
                 val = (int)(Math.Round(val / 5.0) * 5);
                 _iniValues["volume"] = val.ToString();
+                _changed.Add("volume");
                 Invalidate();
             }
             string id = HitAt(e.X, e.Y);
@@ -2886,9 +2952,15 @@ namespace OpenSmash.Launcher
             if (step.Success && int.TryParse(step.Groups[2].Value, out int pct))
             {
                 string detail = Regex.Replace(step.Groups[1].Value, @"[^A-Za-z0-9.)\]]+$", "").Trim();
-                _pluginDetail = detail.Length > 0 ? detail : text;
-                _pluginFrac = Math.Clamp(pct / 100f, 0f, 1f);
-                _pluginEta = step.Groups[3].Value.Trim().TrimStart(',', ' ');
+                // The percent is the whole build's (tools\skyline.py run_logged), across every program it runs;
+                // one that goes down (an older tools folder: a program's own bar starting over) is not shown.
+                float frac = Math.Clamp(pct / 100f, 0f, 1f);
+                if (frac >= _pluginFrac)
+                {
+                    _pluginDetail = detail.Length > 0 ? detail : text;
+                    _pluginFrac = frac;
+                    _pluginEta = step.Groups[3].Value.Trim().TrimStart(',', ' ');
+                }
             }
             else if (!text.Contains("recomp.py") && text.Length < 240)
                 _pluginDetail = text;
@@ -3062,14 +3134,19 @@ namespace OpenSmash.Launcher
 
         async Task<string> UnbuiltPluginChoice()
         {
-            if (_launchMode == "vanilla") return "play";
+            // Without mods it is the same program (build\ssbu.exe, the community plugins loaded): a link it needs
+            // (an update changed the runtime) is asked for as with mods. The mods' own plugins are not loaded then,
+            // so one waiting, to be refreshed or not linked in yet is not (needs_build_vanilla).
+            bool vanilla = _launchMode == "vanilla";
             await RefreshMods();
-            var waiting = _mods.Where(m => m.Enabled && m.Code == "waiting")
+            var waiting = vanilla ? new List<string>() : _mods.Where(m => m.Enabled && m.Code == "waiting")
                 .Select(m => string.IsNullOrEmpty(m.Title) ? m.Name : m.Title)
                 .Distinct()
                 .ToList();
-            bool full = !string.IsNullOrEmpty(_pluginBuildReason);
-            string why = full ? PluginUpdateWhy(waiting, _pluginBuildReason) : PluginRefreshWhy(waiting, _pluginRefreshReason);
+            string reason = vanilla ? _vanillaBuildReason : _pluginBuildReason;
+            bool full = !string.IsNullOrEmpty(reason);
+            if (vanilla && !full) return "play";
+            string why = full ? PluginUpdateWhy(waiting, reason) : PluginRefreshWhy(waiting, _pluginRefreshReason);
             if (why.Length == 0) return "play";
             _pluginPromptKind = full ? "update" : "refresh";
             _pluginPromptText = why;

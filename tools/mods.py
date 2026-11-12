@@ -311,6 +311,14 @@ def extract(archive, into):
             if os.path.exists(seven):
                 r = subprocess.run([seven, "x", "-y", f"-o{into}", archive], capture_output=True, text=True)
                 break
+    if r.returncode and os.name != "nt":   # (Linux's GNU tar reads neither .7z nor .rar: the unpackers it may have)
+        for cmd in unpack_commands(archive, into):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True)
+            except OSError:
+                continue
+            if not r.returncode:
+                break
     if r.returncode and archive.lower().endswith(".7z"):   # (no 7-Zip: py7zr, which the installer adds)
         try:
             import py7zr
@@ -325,8 +333,33 @@ def extract(archive, into):
                 z.extractall(into)
             return
     if r.returncode:
-        hint = " (install 7-Zip, from 7-zip.org, to open .7z and .rar files)" if os.name == "nt" else ""
+        if os.name == "nt":
+            hint = " (install 7-Zip, from 7-zip.org, to open .7z and .rar files)"
+        elif sys.platform == "darwin":
+            hint = ""
+        else:
+            hint = (" (install 7-Zip or bsdtar from your distribution - the 7zip, p7zip or libarchive-tools package - to "
+                    "open .7z and .rar files)")
         raise Error(f"cannot unpack {os.path.basename(archive)}{hint}: {(r.stderr or r.stdout).strip()[-400:]}")
+
+
+# (unpacker, its arguments) for .7z, .rar and the rest where tar can't: libarchive's bsdtar, 7-Zip (7zz: 7-Zip's own
+# Linux build, 7z / 7za: p7zip's), unrar, The Unarchiver's unar
+UNPACKERS = (("bsdtar", ["-xf", "{archive}", "-C", "{into}"]), ("7zz", ["x", "-y", "-o{into}", "{archive}"]),
+             ("7z", ["x", "-y", "-o{into}", "{archive}"]), ("7za", ["x", "-y", "-o{into}", "{archive}"]),
+             ("unrar", ["x", "-o+", "-y", "{archive}", "{into}/"]), ("unar", ["-f", "-q", "-o", "{into}", "{archive}"]))
+
+
+def unpack_commands(archive, into, which=shutil.which):
+    """The commands that may unpack `archive` into `into`, of the unpackers installed (unrar only for a .rar)."""
+    out = []
+    for name, args in UNPACKERS:
+        if name == "unrar" and not archive.lower().endswith(".rar"):
+            continue
+        exe = which(name)
+        if exe:
+            out.append([exe] + [a.format(archive=archive, into=into) for a in args])
+    return out
 
 
 def safe_name(name):
@@ -2025,6 +2058,7 @@ def apply(tree, log=print):
     lines = vanilla_cfg(tree)
     state = tree.load()
     on = [n for n in state["order"] if state["mods"].get(n, {}).get("enabled")]
+    prcxml_redirects(tree, on, log)
     if os.path.exists(os.path.join(tree.root, "skyline", "plugins", "libarcropolis.nro")):
         # the real ARCropolis is among the standard plugins: it reads the turned-on mods from
         # sd:/ultimate/mods (runtime/hle_fs.c) as the game loads, so the game keeps its own data
@@ -2164,6 +2198,49 @@ def motion_list_text_unreadable(path):
         return False
     flags = len(re.findall(r"^\s*flags:\s*$", text, re.M))
     return any(len(re.findall(rf"^\s*{k}:", text, re.M)) < flags for k in ("unk_800", "unk_1000", "unk_2000"))
+
+
+COLOR_START = prc.hash40("color_start_index")
+UI_CHARA_ID = prc.hash40("ui_chara_id")
+CHARA_DB = ("ui", "param", "database", "ui_chara_db.prcxml")
+
+
+def prcxml_redirects(tree, on, log):
+    """The characters the turned-on mods add with their ui_chara_db.prcxml alone - no plugin, so no
+    CSK Collection call - on another fighter's extra costumes (Popple: Mario's c24-c31, its
+    color_start_index 24), into dump/skyline/prcxml_redirects.txt, a line each: the ui_chara hash40
+    and its first costume. runtime/hle_skyline.c adds them to the characters it redirects, as the
+    CSK Collection does on the console; without it such a character played its fighter's c00."""
+    found = {}
+    for name in on:
+        for root in find_roots(os.path.join(tree.mods, name)) or [os.path.join(tree.mods, name)]:
+            path = os.path.join(root, *CHARA_DB)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    kind, db = prc.read_xml(f.read())
+            except (prc.Error, ET.ParseError, ValueError) as e:
+                log(f"{name}: its {'/'.join(CHARA_DB)} could not be read ({e}): its characters keep costume 0")
+                continue
+            if kind != prc.STRUCT:
+                continue
+            for _key, (list_kind, entries) in db:
+                if list_kind != prc.LIST:
+                    continue
+                for entry_kind, entry in entries:
+                    if entry_kind != prc.STRUCT:
+                        continue
+                    fields = dict(entry)
+                    chara, start = fields.get(UI_CHARA_ID, (None, 0))[1], fields.get(COLOR_START, (None, 0))[1]
+                    if chara and start:
+                        found[chara] = start
+    path = os.path.join(tree.root, "dump", "skyline", "prcxml_redirects.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.writelines(f"{chara:#x} {start}\n" for chara, start in found.items())
+    if found:
+        log(f"{len(found)} character(s) of .prcxml files on their own costumes (prcxml_redirects.txt)")
 
 
 def hide_shadowed_sources(tree, on, log):

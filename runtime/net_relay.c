@@ -307,9 +307,11 @@ int net_rollback_default(void) {
     /* This can run before backend registration (the rollback constructor). */
     const char *backend = getenv("SSBU_NET_BACKEND");
     if (backend && !_stricmp(backend, "yuzu")) return v;
-    /* (off unless asked for: online_rollback.txt "on", the settings menu's Online > Rollback netcode. The game's
-     * own netcode is the default until rollback passes two-PC tests; alpha.3's players found it unplayable) */
-    if (!(settings_line_read(config_path(CONFIG_ONLINE_ROLLBACK), line, sizeof line) && !_strnicmp(line, "on", 2))) return v;
+    /* (alpha.3's players found rollback unplayable and #201 made the game's own netcode the default) */
+    /* (on again by default since 2026-11-11: catch-ups fit in a frame - over 16.7 ms in under 1 % at 40 ms one way, about
+     * 3-4 % at 120-150 ms, input delay from the measured trip up to 9 frames, 0 desyncs in pair runs (#254-#277); online_rollback.txt
+     * "off" or the settings menu gives the game's own netcode) */
+    if (settings_line_read(config_path(CONFIG_ONLINE_ROLLBACK), line, sizeof line) && !_strnicmp(line, "off", 3)) return v;
     /* (a private room started by Host/Join SSBU Netplay.bat: SSBU_NET_HOST or SSBU_NET_RELAY, no --online) */
     if (h && *h && strcmp(h, "0")) return v = 1;
     if (r && *r) return v = _stricmp(r, "off") != 0;
@@ -361,7 +363,14 @@ static void configure(void) {
     if ((v = getenv("SSBU_NET_LAN_PORT")) && atoi(v) > 0 && atoi(v) < 65536) lan_port = (u16)atoi(v);
     if ((v = getenv("SSBU_NET_LAN_TEST"))) lan_test = atoi(v) > 0;
     if (hosting) snprintf(relay_text, sizeof relay_text, "127.0.0.1:%u", port);
-    else if (r && *r) { if (_stricmp(r, "off")) snprintf(relay_text, sizeof relay_text, "%s", r); }
+    else if (r && *r) {
+        /* (the macOS and Linux launchers pass online_server.txt's first word as SSBU_NET_RELAY: "auto", "na" and "eu"
+         * are the public lobbies there too - issue #259, they were taken as host names and nothing was joined) */
+        if (!_stricmp(r, "auto")) nearest_lobby(relay_text, sizeof relay_text);
+        else if (!_stricmp(r, "na")) snprintf(relay_text, sizeof relay_text, "%s", PUBLIC_LOBBIES[0].host);
+        else if (!_stricmp(r, "eu")) snprintf(relay_text, sizeof relay_text, "%s", PUBLIC_LOBBIES[1].host);
+        else if (_stricmp(r, "off")) snprintf(relay_text, sizeof relay_text, "%s", r);
+    }
     else if (settings_online()) configure_from_files();
     lan_mode = !hosting && !_stricmp(relay_text, "lan");
     configured = hosting || relay_text[0];

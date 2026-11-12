@@ -14,7 +14,7 @@ It is the merge of two projects, [WindowSmash](https://github.com/OpenSmash-Ulti
 
 ## Install
 
-1. Download **[OpenSmash Setup.exe](https://github.com/OpenSmash-Ultimate/OpenSmash-Ultimate/releases/download/v0.3.0-alpha.3/OpenSmash-Setup.exe)** from the latest [release](https://github.com/OpenSmash-Ultimate/OpenSmash-Ultimate/releases) and run it. It does the rest.
+1. Download **[OpenSmash.exe](https://github.com/OpenSmash-Ultimate/OpenSmash-Ultimate/releases/download/v0.3.0-alpha.3/OpenSmash.exe)** from the latest [release](https://github.com/OpenSmash-Ultimate/OpenSmash-Ultimate/releases) and run it. It does the rest.
 2. Choose where OpenSmash goes (about 60 GB free; not the Desktop or Documents) and click **Download and set up**. It downloads the project from GitHub into that folder, makes the **OpenSmash** and **Play SSBU** shortcuts (desktop and Start menu), and opens the launcher there.
 3. In the installer window, check that it found your game files (game plus its 13.0.5 update), keys and optionally firmware; fix any folder with **Browse**. Click **Set up and build** and wait: 30 minutes to a few hours.
 4. Press **Play** in the launcher, or use the **Play SSBU** shortcut.
@@ -47,7 +47,7 @@ Rows that link to pull requests are being reviewed and land in `main` as they ar
 | [Mods and Skyline plugins](docs/SKYLINE.md) | install mods and plugins and turn them on or off. |
 | [DLC and unlocks](docs/DLC-AND-UNLOCKS.md) | use your DLC, or unlock every base-game fighter on your save. |
 | [The 13.0.5 update](docs/UPDATES.md) | see which copies of the game count as 13.0.5 and how the update is applied. |
-| [Linux](docs/LINUX.md) · [macOS](docs/MACOS.md) | install, build and run the experimental versions. |
+| [Linux](docs/LINUX.md) · [macOS](docs/MACOS.md) | install, build and run the experimental versions. The OpenSmash Launcher (`opensmash-launcher.sh`, `OpenSmash Launcher.command`) does setup, updates, Play, settings and mods in a window, with a game pad too (Steam Deck Game Mode). |
 | [How it works](docs/TECHNICAL.md) | understand the recompiler, the runtime and every tool. |
 
 ## `ssbu-recomp/`

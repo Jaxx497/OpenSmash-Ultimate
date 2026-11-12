@@ -704,9 +704,15 @@ void kernel_map_status(void) {
 u64 rb_mem_changed[RB_CHANGES][2];
 volatile LONG rb_mem_nchanged;
 static int rb_switch = -1;   /* kernel_rb_switch(), once */
+#ifdef _WIN32   /* (hle_rb_state.c is Windows-only, as rollback is) */
+void rb_shadow_note(u64 at, u64 size);   /* (hle_rb_state.c: the shadow's copies of pages it shares with memory, made now) */
+#endif
 void rb_mem_note(u64 at, u64 size) {   /* (host.c too: modules loaded) */
     if (rb_switch < 0) rb_switch = kernel_rb_switch();
     if (!rb_switch) return;
+#ifdef _WIN32
+    rb_shadow_note(at, size);
+#endif
     LONG i = InterlockedIncrement(&rb_mem_nchanged) - 1;
     if (i < RB_CHANGES) { rb_mem_changed[i][0] = at; rb_mem_changed[i][1] = size; }
 }
@@ -1167,9 +1173,14 @@ static void system_call(Cpu *c, u32 n) {
     if (rt_trace) fprintf(stderr, "[svc %#04x] thread %llu x0=%#llx x1=%#llx x2=%#llx x3=%#llx\n", n, me->id, x[0], x[1], x[2], x[3]);
 
     void skyline_note_sleep(void);
+    int movie_preroll_skip(u64 ns);
     /* calls that never touch shared kernel state */
     switch (n) {
     case 0x0B:   /* SleepThread(ns): non-positive values are yield requests */
+        if ((i64)x[0] > 0 && movie_preroll_skip(x[0])) {   /* (hle_movie.c: a movie's pre-roll with nothing left to wait for) */
+            SwitchToThread();
+            return;
+        }
         if ((i64)x[0] > 0) skyline_note_sleep();   /* (hle_skyline.c: ARCropolis' event thread going round) */
         if ((i64)x[0] > 0) {
             if (rb_switch > 0) {   /* (rollback: a kwait nothing wakes but a hold, so a hold can park it) */

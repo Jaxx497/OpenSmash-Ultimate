@@ -122,6 +122,7 @@ static const char DEFAULT_INI[] =
 #endif
     "pacing = clock\n"
     "; latency = 1-3: how many frames the graphics card may work ahead. Lower is more responsive.\n"
+    ";   (the Vulkan renderer keeps 2 at least: with 1 the processor and the card wait for each other every frame)\n"
     "latency = 3\n"
     "; low_latency = 1: the game starts each frame later, as late as it can and still be ready for the next\n"
     ";   refresh, so it reads the controller later: up to most of a frame less input delay. 0: at the refresh.\n"
@@ -168,7 +169,7 @@ static const char DEFAULT_INI[] =
     "\n"
 #ifdef _WIN32
     "; renderer = auto | direct3d11 | vulkan\n"
-    ";   auto:       Vulkan on an AMD graphics card, Direct3D 11 on any other (and whenever Vulkan cannot\n"
+    ";   auto:       Vulkan on an AMD or NVIDIA graphics card, Direct3D 11 on any other (and whenever Vulkan cannot\n"
     ";               start, or stopped the game in its first seconds twice in a row).\n"
     ";   direct3d11: Direct3D 11 on any card.\n"
     ";   vulkan:     Vulkan on any card (Direct3D 11 if it cannot start; the log says why).\n"
@@ -321,8 +322,8 @@ float display_render_scale(void) { load(); return cfg.render_scale; }
 int display_renderer(void) { load(); return cfg.renderer; }
 /* The picture shape (display.ini aspect, SSBU_ASPECT over it): "W:H", a number, or auto (the primary
  * monitor's shape); 16:9 for anything not wider, at most 32:9 (the widest supported). 16:9 for online
- * matches (display_aspect_take) and, for the whole session, with any renderer but Direct3D 11 (the
- * others are not ported yet): display_shape_locked. */
+ * matches (display_aspect_take) and, for the whole session, unless display.ini asks for Direct3D 11 by
+ * name (renderer = direct3d11; auto may draw with Vulkan, not ported yet): display_shape_locked. */
 int game_fight_on(void);     /* (hle_fight_test.c) */
 int net_match_now(void);     /* (host.c: a networked match set up or under way) */
 int display_shape_locked(void) {
@@ -330,12 +331,15 @@ int display_shape_locked(void) {
     if (locked < 0) {
         load();
 #ifdef _WIN32
-        locked = cfg.renderer == RENDERER_VULKAN;
+        /* (asked for, not drawing: the hooks go in before the first GPU work chooses the back end, and auto
+         * chooses Vulkan on most cards. ponytail: auto on a card it gives Direct3D 11 is held at 16:9 too;
+         * gone once Vulkan draws wider pictures) */
+        locked = cfg.renderer != RENDERER_D3D11;
 #else
         locked = 1;
 #endif
         if (locked && _stricmp(cfg.aspect, "16:9"))
-            fprintf(stderr, "[display] picture shape 16:9 (aspect = %s set): only Direct3D 11 draws wider pictures yet\n", cfg.aspect);
+            fprintf(stderr, "[display] picture shape 16:9 (aspect = %s set): only Direct3D 11 draws wider pictures yet (renderer = direct3d11)\n", cfg.aspect);
     }
     return locked;
 }
@@ -741,12 +745,15 @@ static int monitor_hz(void) {
 /* `display` pacing: the next vblank the game should see, or 0 to use the clock this time. */
 static int vblank_tick(void) {
     static IDXGIOutput *output;
-    static int divisor, failed;
+    static int divisor, failed, hz_now;
+    static LONGLONG last;   /* (the refresh the last tick returned at, performance counter; 0 none) */
     if (failed) return 0;
     if (InterlockedExchange(&monitor_changed, 0) || !output) {
         if (output) IDXGIOutput_Release(output);
         output = (IDXGIOutput *)gfx_display_output();
         int hz = monitor_hz();
+        hz_now = hz;
+        last = 0;
         divisor = hz >= 58 && hz <= 61 ? 1 : hz >= 118 && hz <= 121 ? 2 : hz >= 238 && hz <= 241 ? 4 : 0;
         static int logged_hz = -1;
         if (hz != logged_hz && output) {
@@ -754,13 +761,24 @@ static int vblank_tick(void) {
             fprintf(stderr, "[display] %d Hz monitor: %s\n", hz, divisor ? "display pacing" : "clock pacing (display pacing needs 60, 120 or 240 Hz)");
         }
     }
-    if (!output || !divisor) return 0;
+    if (!output || !divisor) { last = 0; return 0; }
     LARGE_INTEGER t0, t1, freq;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&t0);
-    for (int i = 0; i < divisor; i++)
+    /* The divisor-th refresh after the one the last tick returned at, not after now: the vsync thread comes
+     * back here late when its frame's work - or low_latency's held signal, up to most of a 60 Hz frame - ran
+     * past the monitor's next refresh, and "two refreshes from now" at 120 Hz was then three after the last
+     * tick, 25 ms (a fight on a 120 Hz monitor: up to ~1 frame in 100 shown 1.5 frames late). Refreshes are counted
+     * by their times, so a wait that returns at once or misses one is counted as what it was. */
+    LONGLONG period = freq.QuadPart / hz_now;
+    for (int waits = 0;;) {
         if (FAILED(IDXGIOutput_WaitForVBlank(output))) { failed = 1; break; }
+        QueryPerformanceCounter(&t1);
+        if (!last || ++waits >= 2 * divisor + 2) break;   /* (the first tick; and never more than a few refreshes) */
+        if ((t1.QuadPart - last + period / 2) / period >= divisor) break;
+    }
     QueryPerformanceCounter(&t1);
+    last = t1.QuadPart;
     if (!failed && (t1.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart > 50 * divisor) failed = 1;
     if (failed) fprintf(stderr, "[display] waiting for the monitor's refresh failed: clock pacing from now on\n");
     return !failed;
