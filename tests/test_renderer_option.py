@@ -58,8 +58,8 @@ class RendererOption(unittest.TestCase):
     def test_names(self):
         out, _ = self.run_test('parse', 'vulkan', 'parse', 'Vulkan', 'parse', 'vk', 'parse', 'd3d11', 'parse', 'DXVK', 'parse', 'metal',
                                'parse', 'auto', 'parse', 'direct3d11', 'parse', 'DX11', 'parse', 'opengl', 'parse', '')
-        # (d3d11, the value every default display.ini before auto was written with, is Direct3D 11 as it says, not auto)
-        self.assertEqual(out, ['parse vulkan -> 1 vulkan', 'parse Vulkan -> 1 vulkan', 'parse vk -> 1 vulkan', 'parse d3d11 -> 2 direct3d11',
+        # (d3d11, the value every default display.ini before auto was written with, is auto; direct3d11 is Direct3D 11)
+        self.assertEqual(out, ['parse vulkan -> 1 vulkan', 'parse Vulkan -> 1 vulkan', 'parse vk -> 1 vulkan', 'parse d3d11 -> 0 auto',
                                'parse DXVK -> 0 auto', 'parse metal -> 0 auto', 'parse auto -> 0 auto', 'parse direct3d11 -> 2 direct3d11',
                                'parse DX11 -> 2 direct3d11', 'parse opengl -> -1 -', 'parse  -> -1 -'])
 
