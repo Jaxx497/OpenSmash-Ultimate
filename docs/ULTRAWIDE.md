@@ -320,5 +320,10 @@ What is left is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md). Done, with what was l
    the owner tried it in a fight and saw nothing happen, and only online fights need the wait (a hitch
    there is both players'): offline it is taken at once (5 switches mid-fight, the same fight). Online:
    16:9 per match, not per session (OpenSmash.exe starts every session on the lobby; ADR 0002).
-6. **Upstream merged** (2026-11-12, 52 commits): `auto` draws with Vulkan on AMD, NVIDIA and Intel cards
+6. **A second replay, the whole match** (2026-11-12): the owner's Bridge of Eldin replay, Ganondorf against
+   Pichu, recorded at 32:9 zoomed (`build\aspect_test\auto\e2_*.bat`, stopped at fight frame 5300: the
+   replay viewer goes on to the next replay by itself, and SSBU_DEBUG_END counts no replay frames). Against
+   16:9: 32:9 zoomed, 32:9 wide, the view switched every 200 frames and the shape every 7 s (21 switches)
+   the same up to GAME! (frame 5153, the winner's pose); 21:9 hybrid the same throughout.
+7. **Upstream merged** (2026-11-12, 52 commits): `auto` draws with Vulkan on AMD, NVIDIA and Intel cards
    since, so wider pictures need `renderer = direct3d11` until the Vulkan port.

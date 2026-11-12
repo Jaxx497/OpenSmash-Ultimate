@@ -36,11 +36,11 @@ Order agreed with the owner (2026-11-11): HUD work first, then the Vulkan port.
 Rule for every row: once turned on it stays on; any change takes effect at the next start
 ([ADR 0001](adr/0001-visual-features-never-change-the-fight.md)).
 
-- [ ] **Ultrawide online**: the picture shape kept in online matches. Disclaimer: "Experimental. A mistake
+- [x] **Ultrawide online** (display.ini `experimental_ultrawide_online`; the shape still never changes inside an online fight): the picture shape kept in online matches. Disclaimer: "Experimental. A mistake
       in this feature changes the fight for you AND your opponent, and can make the match go out of sync."
-- [ ] **Open log folder**: Explorer on `build\` with `play.log` selected (rollback's desync reports too).
-- [ ] **`play.prev.log`**: the previous session's log kept at each start.
-- [ ] **The log names the shape and view** at each online match's start, and the rollback desync report
+- [x] **Open log folder** (Windows): Explorer on `build\` with `play.log` selected (rollback's desync reports too).
+- [x] **`play.prev.log`**: the previous session's log kept at each start (the launcher, `Program.cs`; reaches players with the next launcher build).
+- [x] **The log names the shape and view** at each online match's start, and the rollback desync report
       carries that line ([ADR 0002](adr/0002-online-held-at-16-9.md)).
 
 ## HUD (see ULTRAWIDE.md, "HUD decisions")

@@ -129,13 +129,14 @@ enum
     P_GAME,
     P_LOBBY,
     P_MODS,
+    P_EXP,
     P_REMAP,
     P_KEYS,
     P_STICKS,
     PAGES = P_REMAP
 }; /* (the pad's buttons, the keyboard's keys, the pad's sticks: no key of their own) */
 #define SUB_PAGE(p) ((p) == P_REMAP || (p) == P_KEYS || (p) == P_STICKS) /* (a page of the Controllers page's) */
-static const char *const PAGE_NAMES[PAGES] = {"Display", "Controllers", "Online", "Game", "Lobby", "Mods"};
+static const char *const PAGE_NAMES[PAGES] = {"Display", "Controllers", "Online", "Game", "Lobby", "Mods", "Experimental"};
 enum { K_INFO, K_CHOICE, K_ACTION, K_TEXT };
 enum { W_NONE, W_NOW, W_RESTART };
 enum {
@@ -145,7 +146,7 @@ enum {
     R_RUMBLE, R_KEYBOARD, R_BACKGROUND, R_PADS_FILE,
     R_NET_STATUS, R_NET_MODE, R_NET_CODE, R_NET_SERVER, R_NET_NAME, R_NET_DIRECT, R_NET_PROTOCOL,
     R_LOBBY, R_MATCH_FIND, R_MATCH_CANCEL, R_ROOMS,
-    R_LANGUAGE, R_VOLUME, R_RESTART, R_QUIT, R_REMAP_BACK, R_MODS_STATE, R_MOD_CODE, R_MODS_OFF, R_LAN_ROOMS,
+    R_LANGUAGE, R_VOLUME, R_UW_ONLINE, R_OPEN_LOGS, R_RESTART, R_QUIT, R_REMAP_BACK, R_MODS_STATE, R_MOD_CODE, R_MODS_OFF, R_LAN_ROOMS,
     R_KEYS, R_KEYS_BACK, R_KEYS_RESET, R_RENDERER, R_ROOMS_PREV, R_ROOMS_NEXT, R_ROOMS_GAME_PAGE, R_RUNAHEAD, R_NET_ROLLBACK, R_NET_DELAY,
     R_ROOM_FIRST = 60,    /* + the room's place on the page of rooms shown (ROOM_PAGE at most) */
     R_REMAP_FIRST = 100,  /* + console button */
@@ -1203,6 +1204,21 @@ static void build(void)
     case P_MODS:
         mods_rows(!same);
         break;
+    case P_EXP: /* (features still being tried: each is saved, and takes effect at the next start; docs/adr/0001) */
+        r = add(R_UW_ONLINE, display_shape_locked() ? K_INFO : K_CHOICE, W_RESTART, "Ultrawide online",
+                "Experimental. Keeps your picture shape in online matches instead of 16:9. A mistake in this feature changes "
+                "the fight for you and your opponent, and can make the match go out of sync. Takes effect when the game starts again.");
+        snprintf(r->value, sizeof r->value, "%s", on_off(display_uw_online_saved()));
+        if (display_shape_locked())
+            snprintf(r->note, sizeof r->note, "Direct3D 11 only");
+#ifdef _WIN32
+        add(R_OPEN_LOGS, K_ACTION, W_NONE, "Open log folder",
+            "Opens the folder with the game's log, play.log, so you can send it to the developers. play.prev.log is the one "
+            "from the time before. Rollback's desync reports are in the reports folder.");
+#endif
+        if (restart_pending)
+            add(R_RESTART, K_ACTION, W_NONE, "Restart now", "Starts the game again, with the changes. A match in progress is lost.");
+        break;
     case P_LOBBY:
         build_lobby(!same);
         if (was == R_NONE)
@@ -1456,6 +1472,13 @@ static void change(const Row *row, int dir)
         i = i < 0 ? (dir > 0 ? 0 : n - 1) : cycle(i, n, dir);
         set_display("aspect", SHAPES[i]);
         display_set_aspect(SHAPES[i]);   /* (taken at the next frame) */
+        break;
+    }
+    case R_UW_ONLINE:
+    {
+        int on = !display_uw_online_saved();
+        display_set_uw_online(on);
+        set_display("experimental_ultrawide_online", on ? "1" : "0");
         break;
     }
     case R_VIEW:
@@ -1801,6 +1824,29 @@ static void action(const Row *row)
     case R_QUIT:
         confirm = row->id;
         break;
+#ifdef _WIN32
+    case R_OPEN_LOGS:
+    { /* Explorer on build\ with play.log selected (the launcher writes it; the game runs in the project's folder) */
+        wchar_t path[MAX_PATH], cmd[MAX_PATH + 32];
+        DWORD n = GetFullPathNameW(L"build\\play.log", MAX_PATH, path, NULL);
+        if (n && n < MAX_PATH && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+            _snwprintf(cmd, MAX_PATH + 32, L"explorer.exe /select,\"%ls\"", path);
+        else if ((n = GetFullPathNameW(L"build", MAX_PATH, path, NULL)) && n < MAX_PATH)
+            _snwprintf(cmd, MAX_PATH + 32, L"explorer.exe \"%ls\"", path);
+        else
+            break;
+        cmd[MAX_PATH + 31] = 0;
+        STARTUPINFOW si = {sizeof si};
+        PROCESS_INFORMATION pi;
+        if (CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+        {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            menu_toast("The log folder is open");
+        }
+        break;
+    }
+#endif
     case R_MODS_OFF:
         if (!mods_switch_set("--all", 0))
         {

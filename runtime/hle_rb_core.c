@@ -3303,6 +3303,11 @@ static void online_fight_start(void) {
     if (!online_match) return;
     u64 impl = fm_impl();
     fprintf(stderr, "[rb] online: GO!: melee mode %u in the match block, the fighter manager's +0xc0 %08x\n", ld8(MELEE_INFO), impl ? ld32(impl + 0xc0) : 0);
+    {   /* (this player's picture, in the desync report too: a desync traced to ultrawide or ruled out, docs/adr/0002) */
+        float display_aspect(void); int display_view(void), display_uw_online(void);
+        fprintf(stderr, "[rb] online: GO!: this player's picture shape %.4g, view %d%s\n", display_aspect(), display_view(),
+                display_uw_online() ? " (experimental: ultrawide online)" : "");
+    }
 }
 static void online_restore(void) {
     if (!online_match) return;

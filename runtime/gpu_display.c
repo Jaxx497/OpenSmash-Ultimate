@@ -60,6 +60,7 @@ static struct {
     int renderer;         /* RENDERER_* (renderer.h) */
     char aspect[16];      /* the picture shape: "16:9", "auto" or "W:H" (docs/ULTRAWIDE-CONTEXT.md) */
     int view;             /* VIEW_* (display.h) */
+    int uw_online;        /* experimental_ultrawide_online: the picture shape kept in online matches (read at the start) */
 } cfg = {MODE_WINDOWED, 1280, 720, 3, 1, 1, 1, PACING_CLOCK, 0, "auto", 1.0f, 1.0, RENDERER_DEFAULT, "16:9", VIEW_HYBRID};
 
 static int cfg_runahead;   /* display.ini's runahead (display_runahead) */
@@ -281,6 +282,7 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
         else if (!_stricmp(key, "view")) parse_view(value, path);
         else if (!_stricmp(key, "volume")) {}   /* (the master volume: ipc_audio.c's audio_master_volume reads it) */
         else if (!_stricmp(key, "language")) {}   /* (the game's language: hle_env.c reads it) */
+        else if (!_stricmp(key, "experimental_ultrawide_online")) cfg.uw_online = atoi(value) != 0;
         else fprintf(stderr, "[display] %s: unknown setting '%s'\n", path, key);
     }
     if (f) fclose(f);
@@ -394,19 +396,31 @@ int display_aspect_take(void) {
         static const float SHAPES[] = {16.0f / 9, 21.0f / 9, 32.0f / 9};
         shape_want = SHAPES[(unsigned long long)((double)rt_now_ns() / (cycle * 1e9)) % 3];
     }
-    static int for_online;   /* (the shape now is 16:9 for an online match) */
-    int online = !display_shape_locked() && net_match_now();
-    float want = online ? 16.0f / 9 : shape_want;   /* (online matches: 16:9, owner 2026-11-11) */
-    if (want == shape_now || ((online || for_online) && game_fight_on())) return 0;   /* (an online fight: never a hitch in it) */
+    static int for_online;   /* (the shape now is the one taken for an online match) */
+    int net = !display_shape_locked() && net_match_now(), online = net && !cfg.uw_online;
+    static int was_net;
+    if (net != was_net) {   /* (the shape and view of each online match, in the log: docs/adr/0002) */
+        was_net = net;
+        if (net) fprintf(stderr, "[display] online match: picture shape %.4g, view %s%s\n", online ? 16.0f / 9 : shape_want,
+                         cfg.view == VIEW_WIDE ? "wide" : cfg.view == VIEW_ZOOMED ? "zoomed" : "hybrid",
+                         cfg.uw_online ? " (experimental: ultrawide online)" : " (held at 16:9)");
+    }
+    float want = online ? 16.0f / 9 : shape_want;   /* (online matches: 16:9, owner 2026-11-11; unless the experimental unlock) */
+    if (want == shape_now || ((net || for_online) && game_fight_on())) return 0;   /* (an online fight: never a hitch in it) */
     fprintf(stderr, "[display] picture shape now %.4g (was %.4g)%s%s\n", want, shape_now, online ? ", for an online match" : "",
             game_fight_on() ? ", in a fight" : "");
     shape_now = want;
-    for_online = online;
+    for_online = net;
     window_follow_shape();
     return 1;
 }
 int display_view(void) { load(); return cfg.view; }
 const char *display_aspect_setting(void) { load(); return cfg.aspect; }
+/* The experimental unlock (settings' Experimental tab): this session's, and the one saved for the next start. */
+static int uw_online_saved = -1;
+int display_uw_online(void) { load(); return cfg.uw_online; }
+int display_uw_online_saved(void) { load(); return uw_online_saved < 0 ? cfg.uw_online : uw_online_saved; }
+void display_set_uw_online(int on) { uw_online_saved = on != 0; }
 void display_set_aspect(const char *text) {
     display_aspect();
     snprintf(cfg.aspect, sizeof cfg.aspect, "%s", text);
