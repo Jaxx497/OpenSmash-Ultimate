@@ -48,12 +48,16 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 - [x] Pause menu elements: panels to the side their layout puts them against (the game's own layouts; see ULTRAWIDE.md, `pane_place`)
 - [x] Training mode elements (the + menu too)
 - [x] Timer placement: the "Timer position" setting (right, center, left, hidden), two-digit minutes checked
-- [x] Radar (the minimap square): seen in a test (2026-11-12, a fighter off the bottom): the picture's top-right corner, under the timer
-- [ ] Battle Camera frame (camera controls' frame overlays) marks the whole picture
+- [x] Radar (the minimap square): it shows on the side of the off-screen fighter; seen on both (2026-11-12): the
+      picture's top-left corner for a fighter off the left, top-right (under the timer) for one off the right
+- [x] Radar's inner box (the Battle Camera frame): left as the game draws it (owner, 2026-11-12: widening it may
+      overlap other things)
 - [ ] A shape changed mid-fight reaches a HUD panel that never changes only at the next fight (making the layouts
       place themselves again was left out: see `pane_place`); fine unless players switch shapes mid-fight
-- [ ] Triple arrows (the blue arrows) follow the bubbles out, in all three views
-- [ ] Wide view: keep drawing the fighter instead of the bubble while inside the picture
+- [ ] Triple arrows (the blue arrows) follow the bubbles out, in all three views (owner: what makes them appear is
+      still to be found; not blocking the first PR)
+- [x] Wide view: the bubble stays at the 16:9 edge, marking a fighter off the standard view (owner, 2026-11-12: as it
+      should be; no change)
 - [x] Menus and loading screens: black side areas for the first PR (owner); the blurred fill after it
 
 ## Bugs to reproduce
@@ -96,7 +100,7 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 - [ ] **Vulkan port**: the squeeze, 2D clip, bubble shift and shape-change surface rebuild in shared code
       both back ends call; Vulkan proven by the replay fight hash (renderer-independent) and by captures of
       the same frames from both back ends compared. Then the lock becomes "Direct3D 11 or Vulkan".
-      Scoped 2026-11-12 (waiting for upstream's Vulkan fixes to settle, #330 and after): `gpu_vk.c` has the
+      Scoped 2026-11-12 (owner: wait for upstream's Vulkan changes still in the works, then port): `gpu_vk.c` has the
       same seams as `gpu_d3d11.c` - `scaled_size` (a 16:9 target widened by the picture's widening), the
       draw's `rt_sx`/`rt_sy` and `params.fix[0]` (the squeeze: x over the widening for 2D), the game's
       scissor (2D clipped to the picture's reach: `hud_wide_on`), the viewport (the bubble's shift), and
