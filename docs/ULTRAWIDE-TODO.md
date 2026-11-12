@@ -48,13 +48,13 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 - [x] Pause menu elements: panels to the side their layout puts them against (the game's own layouts; see ULTRAWIDE.md, `pane_place`)
 - [x] Training mode elements (the + menu too)
 - [x] Timer placement: the "Timer position" setting (right, center, left, hidden), two-digit minutes checked
-- [ ] Radar (the minimap square): to its corner by the side rule; see it in play
+- [x] Radar (the minimap square): seen in a test (2026-11-12, a fighter off the bottom): the picture's top-right corner, under the timer
 - [ ] Battle Camera frame (camera controls' frame overlays) marks the whole picture
 - [ ] A shape changed mid-fight reaches a HUD panel that never changes only at the next fight (making the layouts
       place themselves again was left out: see `pane_place`); fine unless players switch shapes mid-fight
 - [ ] Triple arrows (the blue arrows) follow the bubbles out, in all three views
 - [ ] Wide view: keep drawing the fighter instead of the bubble while inside the picture
-- [ ] Menus and loading screens: fill the side areas
+- [x] Menus and loading screens: black side areas for the first PR (owner); the blurred fill after it
 
 ## Bugs to reproduce
 
@@ -105,9 +105,11 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
       `SSBU_DEBUG_REFERENCE_VIEW`, `SSBU_DEBUG_PANES`, F9; `SSBU_TEST_ASPECT_CYCLE`, `SSBU_TEST_VIEW_CYCLE`; removed: the cull
       hunt, `RCAM_WATCH`, `ASPECT_HYBRID`, `ASPECT_SCREEN`, `NO_2D_CLAMP`, `SHADOW_LOG`, `WIDE_FRAMING_STORED`,
       `FRAMING_SHADOW` (the wide view's old framing re-run).
-- [ ] `docs/PLAYING.md`: the final settings text.
+- [x] `docs/PLAYING.md`: the settings text (aspect, view, timer) matches what ships.
 
 ## After the first PR (not blocking)
+
+- Menus and loading screens: a blurred fill of the side areas instead of black.
 
 - Metal.
 - Online unlocked by default, by [ADR 0002](adr/0002-online-held-at-16-9.md)'s evidence.

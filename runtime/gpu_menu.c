@@ -936,7 +936,7 @@ static void build(void)
         int original = !_stricmp(display_aspect_setting(), "16:9"), locked = display_shape_locked();
         r = add(R_ASPECT, K_CHOICE, W_NOW, "Picture shape",
                 "16:9 (original) is the game as it was made. A wider shape shows more of the stage at the sides without stretching "
-                "anything, and fights play exactly as they do at 16:9. The HUD stays in the middle. 21:9 and 32:9 match your monitor "
+                "anything, and fights play exactly as they do at 16:9. The damage meters stay in the middle; menus and panels move to the sides. 21:9 and 32:9 match your monitor "
                 "when it is close to that shape, and auto always uses your monitor's shape. Online matches are played at 16:9. "
                 "Works with the Direct3D 11 renderer only for now.");
         snprintf(r->value, sizeof r->value, "%s%s", display_aspect_setting(), original ? " (original)" : "");
