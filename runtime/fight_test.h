@@ -131,10 +131,15 @@ static inline void fight_frame_end(FightDrops *d, uint8_t *count, uint8_t *resul
 
 /* SSBU_SEQ's ticks for one poll from the first fighter's fight frame and the game's ready-go
  * flag: the fight frames since the last poll while a fight runs; after it has ended (ready-go
- * cleared) one a poll again until the next one; a new fight's count starting lower is no step. */
-typedef struct FightSteps { long long last, hist[4]; int was_on, ended; } FightSteps;
+ * cleared) one a poll again until the next one; a new fight's count starting lower is no step.
+ * Paused (ready-go on, the fight frame still for FIGHT_PAUSE_POLLS polls), one a poll too, so a
+ * sequence can work the pause menu and camera. */
+enum { FIGHT_PAUSE_POLLS = 30 };
+typedef struct FightSteps { long long last, hist[4]; int was_on, ended, still; } FightSteps;
 static inline long fight_steps(FightSteps *s, long long frame, int on) {
     long long n = frame - s->last;
+    s->still = on && n == 0 ? s->still + 1 : 0;
+    if (s->still > FIGHT_PAUSE_POLLS) { s->hist[0]++; return 1; }
     if (on) { s->was_on = 1; s->ended = 0; }
     else if (s->was_on) s->ended = 1;
     if (n < 0 && s->was_on) { s->last = frame; return s->ended ? 1 : 0; }

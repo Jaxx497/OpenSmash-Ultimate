@@ -24,8 +24,8 @@ do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
 | Damage meters | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
 | Timer | custom: player setting | left, right, original, center or hidden | same | same | to decide | 2026-11-12: a setting with those choices. "Original" is where 16:9 puts it, scaled with the screen's size, not the camera's zoom (owner, 2026-11-12): the same size on one monitor at every shape, bigger on a bigger screen. |
 | Minimap | - | - | - | to decide | Not looked at yet. |
-| Pause menu | - | - | - | to decide | Not looked at yet. |
-| Training mode elements | - | - | - | to decide | Not looked at yet. |
+| Pause menu, pause camera controls | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): same size as at 16:9 on that screen, never stretched, only shifted: an element at the 16:9 view's side (the PAUSE label, the menu box, the camera controls list, the Battle Camera box) moves out by the extra width to the picture's side, an element in the middle stays there. |
+| Training mode elements | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): as the pause menu. |
 | Menus, loading screens | - | - | - | to do | The side areas are to be filled (black, or a blur of the middle: owner's call). |
 
 ## Settings and switches (Direct3D 11 only: `renderer = direct3d11`)

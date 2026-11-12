@@ -54,7 +54,7 @@ Not yet checked in a run:
 
 ## `SSBU_SEQ`
 
-ssbu-recomp found that the game reads player 1's controller once per frame (`ssbu-recomp/runtime/nnhid.c`). That has not been checked in WindowSmash yet. Each read (a *poll*) moves the sequence on by one *tick*. A hook can change that: `input_seq_set_steps` in [`input_seq.h`](../runtime/input_seq.h), which [`SSBU_DETERMINISTIC`](#ssbu_deterministic) uses to count fight frames instead.
+ssbu-recomp found that the game reads player 1's controller once per frame (`ssbu-recomp/runtime/nnhid.c`). That has not been checked in WindowSmash yet. Each read (a *poll*) moves the sequence on by one *tick*. A hook can change that: `input_seq_set_steps` in [`input_seq.h`](../runtime/input_seq.h), which [`SSBU_DETERMINISTIC`](#ssbu_deterministic) uses to count fight frames instead. Fight frames stop while the game is paused, so after 30 polls of a pause the count goes back to one tick a poll, and a sequence can work the pause menu (and its camera controls) and resume.
 
 Steps are separated by spaces or new lines, and `#` starts a comment that runs to the end of the line. Keys are the names `SSBU_INPUT` takes, joined by `+`: `A B X Y L R ZL ZR PLUS MINUS LEFT UP RIGHT DOWN LSTICK RSTICK`, and `SLEFT SUP SRIGHT SDOWN` for the left stick.
 

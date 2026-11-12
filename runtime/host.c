@@ -644,7 +644,12 @@ static u64 render_camera(void);   /* (below) */
 /* In a fight: the fighters' frame line ran in the last quarter second (a frame hook of its own). */
 static volatile u64 fight_line_at;
 static void fight_line(Cpu *c, const u64 args[8], void *ctx) { (void)c; (void)args; (void)ctx; fight_line_at = rt_now_ns(); }
-static int in_fight(void) { return fight_line_at && rt_now_ns() - fight_line_at < 250000000ull; }
+static int line_on(void) { return fight_line_at && rt_now_ns() - fight_line_at < 250000000ull; }
+/* A pause is still the fight: the line stops, the ready-go flag stays on (dropping the views there made
+ * the picture jump to the game's own camera, most near the stage's edge, and the next frames start the
+ * zoomed view's shadow camera afresh). */
+int game_fight_on(void);   /* (hle_fight_test.c) */
+static int in_fight(void) { return line_on() || (fight_line_at && game_fight_on()); }
 /* The offset is on the block only while the frame is prepared for drawing (from this copy until the
  * scene set-up, f_7103747820, returns): game logic may ask where things are on screen (scripts have
  * sv_camera_manager::world_to_screen), and a moved camera changed a fighter's end-of-game pose. */
@@ -724,6 +729,24 @@ static void wide_copy(Cpu *c) {
     if (wide_style_stage()) stage_fit(dst);   /* (sets wide_goal_offset and shadow_k) */
     else if (!wide_style_shadow()) shadow_k = 1;   /* (the wide view: no zoom) */
     for (int i = 0; i < 3; i++) wide_now[i] += (wide_goal_offset[i] - wide_now[i]) * (wide_style_stage() || wide_style_shadow() ? 1.0f : ease);
+    {   /* Paused: the pause shot starts from the picture's view, whose offset fades out as the player
+         * moves the pause camera from where it started (gone a quarter of the camera's distance away):
+         * kept whole, it would push a zoomed-in pause shot off what it shows. */
+        static int paused; static float eye0[3], dist0, now0[3], k0, k_fight = 1;
+        const float *eye = P(float, dst + 0xb0), *at = P(float, dst + 0x100);
+        if (!line_on()) {
+            if (!paused) {   /* (the zoom as the last fight frame had it: the shadow camera stops with the fight) */
+                paused = 1;
+                memcpy(eye0, eye, 12); memcpy(now0, wide_now, 12); k0 = k_fight;
+                dist0 = sqrtf((eye[0] - at[0]) * (eye[0] - at[0]) + (eye[1] - at[1]) * (eye[1] - at[1]) + (eye[2] - at[2]) * (eye[2] - at[2]));
+            }
+            float moved = sqrtf((eye[0] - eye0[0]) * (eye[0] - eye0[0]) + (eye[1] - eye0[1]) * (eye[1] - eye0[1]) + (eye[2] - eye0[2]) * (eye[2] - eye0[2]));
+            float fade = dist0 > 1 ? 1 - moved / (dist0 / 4) : 1;
+            if (fade < 0) fade = 0;
+            for (int i = 0; i < 3; i++) wide_now[i] = now0[i] * fade;
+            shadow_k = 1 + (k0 - 1) * fade;
+        } else { paused = 0; k_fight = shadow_k; }
+    }
     wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */
     wide_apply(dst, wide_now);
