@@ -11,13 +11,19 @@ Order agreed with the owner (2026-11-11): HUD work first, then the Vulkan port.
 
 - [x] **"16:9 (original)"**: the 16:9 preset's label; help text "The game as made for 16:9. The View setting has no effect."
 - [x] **View greyed at 16:9**: shown, with "only with a picture wider than 16:9".
-- [x] **Presets snap to the monitor**: 21:9 and 43:18 take the monitor's exact shape when it is within
+- [x] **Presets snap to the monitor** (43:18 dropped from the menu: on a 21:9 monitor it was the same as 21:9): 21:9 and 43:18 take the monitor's exact shape when it is within
       2.22-2.45 (2560x1080, 3440x1440, 3840x1600), 32:9 within 3.38-3.73; otherwise the preset's own
       shape. No bars in fullscreen inside those ranges; bars outside them are expected.
-- [ ] **Window size and render scale change without a restart**: at once offline; in an online match,
-      after it (as the picture shape).
-- [ ] **Render scale auto follows the shape**: chosen again at each shape change (now: once, at the start).
-- [ ] **Windowed: the window follows the shape**: same height, new width; shrunk to fit the monitor if wider.
+- [x] **Window size and render scale change without a restart**: at once offline; in an online match,
+      after it (as the picture shape). Window size: any renderer on Windows (Linux and macOS: next start).
+      Render scale: Direct3D 11 (Vulkan and Metal: next start); only the targets whose size changes are
+      made again.
+- [x] **Window size options fit the picture shape and the monitor**: the menu offers heights 720 to 2160
+      whose width (height x shape) fits the monitor's work area; display.ini keeps width and height.
+- [x] **Render scale auto follows the shape**: chosen again whenever the window's picture changes size
+      (ponytail: also while a window is dragged, every frame of the drag).
+- [x] **Windowed: the window follows the shape**: same height, new width, around the same centre; shrunk to
+      fit the monitor if wider.
 - [ ] **The online hold ends at the main menu** (now: menus can stay 16:9 after an online match until the
       next offline match).
 - [ ] **Every display setting persists**: a check, row by row, that each one survives a restart.

@@ -281,6 +281,26 @@ static int scale_skipped(u32 w, u32 h) {
     return 0;
 }
 
+/* The render scale display.ini asks for (auto: the picture's height in the window as it is now, over
+ * the game's 1080). Taken at the start and, when it changes (the menu, the window's size, the picture's
+ * shape), at a present: render targets are made again at it. */
+static float scale_wanted(void) {
+    float scale = display_render_scale();
+    DXGI_SWAP_CHAIN_DESC1 scd;
+    if (scale == 0) {
+        scale = 1;
+        if (swapchain && SUCCEEDED(IDXGISwapChain1_GetDesc1(swapchain, &scd))) {
+            unsigned fx, fy, fw, fh;
+            display_fit(scd.Width, scd.Height, &fx, &fy, &fw, &fh);
+            scale = (float)fh / 1080.0f;
+            if (scale < 1) scale = 1;
+            if (scale > 4) scale = 4;
+        }
+    }
+    if (scale < 0.5f || scale > 4) scale = 1;
+    return scale;
+}
+
 /* The host size of a w x h render target. It depends on the game's size only (never the format
  * or depth), so a colour target and the depth target drawn with it always match, as Direct3D
  * requires. A target too big to scale stays at the game's size. */
@@ -816,22 +836,7 @@ static BOOL CALLBACK init(PINIT_ONCE o, PVOID p, PVOID *c) {
     }
     D3D11_BUFFER_DESC dcb = {32, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE, 0, 0};
     ID3D11Device_CreateBuffer(dev, &dcb, NULL, &down_cb);
-    /* The render scale (display.ini render_scale; auto: the picture's height in the window as it
-     * is now, over the game's 1080), fixed from here on: render targets are made at it. */
-    float scale = display_render_scale();
-    DXGI_SWAP_CHAIN_DESC1 scd;
-    if (scale == 0) {
-        scale = 1;
-        if (SUCCEEDED(IDXGISwapChain1_GetDesc1(swapchain, &scd))) {
-            unsigned fx, fy, fw, fh;
-            display_fit(scd.Width, scd.Height, &fx, &fy, &fw, &fh);
-            scale = (float)fh / 1080.0f;
-            if (scale < 1) scale = 1;
-            if (scale > 4) scale = 4;
-        }
-    }
-    if (scale < 0.5f || scale > 4) scale = 1;
-    render_scale = scale;
+    render_scale = scale_wanted();
     u32 pw, ph;
     scaled_size(1920, 1080, &pw, &ph);
     if (!make_final(pw, ph)) {
@@ -1364,6 +1369,7 @@ static void *prewarm_take(const Shader *s) {
  * first use). */
 #define PREWARM_FULL_MS 30000
 int game_fight_on(void);   /* (hle_fight_test.c) */
+int net_match_now(void);   /* (host.c: an online match set up or under way) */
 static LONG prewarm_after = 1;
 static LONG prewarm_running;   /* (under jobs_lock) */
 static volatile LONG prewarm_waiting;   /* (prewarm_gate: the first present waits for the prewarm) */
@@ -6769,10 +6775,23 @@ void d3d11_present(u64 guest, u32 width, u32 height) {
     forget_draw_state();
     gfx_stat_presented++;
     release_graves();
-    if (display_aspect_take()) {   /* a new picture shape, between fights: the 16:9-shaped targets made again at its width */
+    /* A new picture shape: the 16:9-shaped targets made again at its width. A new render scale (menu, window
+     * size, shape; never inside an online fight, where a hitch is both players'): every target made again. */
+    int new_shape = display_aspect_take();
+    float scale = scale_wanted();
+    int new_scale = scale != render_scale && !(game_fight_on() && net_match_now());
+    if (new_scale) {
+        fprintf(stderr, "[gfx] render scale now %.3g%s (was %.3g)\n", scale, display_render_scale() == 0 ? " (auto)" : "", render_scale);
+        render_scale = scale;
+    }
+    if (new_shape || new_scale) {   /* (only the targets whose size changes: one the game drew once keeps its picture) */
         ID3D11DeviceContext_OMSetRenderTargets(ctx, 0, NULL, NULL);
-        for (u32 i = 0; i < nsurfaces; i++)
-            if (surfaces[i].tex && (u64)surfaces[i].width * 9 == (u64)surfaces[i].height * 16) release_surface(&surfaces[i]);
+        for (u32 i = 0; i < nsurfaces; i++) {
+            u32 w, h;
+            if (!surfaces[i].tex) continue;
+            scaled_size(surfaces[i].width, surfaces[i].height, &w, &h);
+            if (w != surfaces[i].hw || h != surfaces[i].hh) release_surface(&surfaces[i]);
+        }
     }
     note_writes();
     evict_shaders();

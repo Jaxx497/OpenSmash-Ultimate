@@ -383,7 +383,9 @@ static void note_env(Row *r, const char *var)
         snprintf(r->note, sizeof r->note, "%s set", var);
 }
 
+#ifdef __APPLE__   /* (elsewhere a height, the width from the picture shape: change(), R_SIZE) */
 static const int SIZES[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
+#endif
 static const int REMAP_ORDER[16] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 4, 5, 13, 15, 12, 14}; /* A B X Y L R ZL ZR + - sticks, d-pad */
 
 /* ---- the Lobby page: the online lobby's rooms and matchmaking (net.h, netplay version 3) ----
@@ -909,12 +911,20 @@ static void build(void)
         note_env(r, "SSBU_OVERLAY");
 #ifdef __APPLE__
         r = add(R_SIZE, K_CHOICE, W_RESTART, "Window size", "The size of the game's window when it is not full screen, in points (on a Retina display, a point is 2 x 2 pixels).");
-#else
-        r = add(R_SIZE, K_CHOICE, W_RESTART, "Window size", "The size of the game's window when it is not full screen (at 100% Windows scaling).");
-#endif
         snprintf(r->value, sizeof r->value, "%d x %d", ds.width, ds.height);
+#else
+        r = add(R_SIZE, K_CHOICE, W_NOW, "Window size",
+                "The size of the game's window when it is not full screen, at 100% Windows scaling. The width follows the picture shape, "
+                "and sizes too big for your monitor are left out.");
+        snprintf(r->value, sizeof r->value, "%d x %d", (int)((float)ds.height * display_aspect() + 0.5f), ds.height);
+#endif
         note_env(r, "SSBU_WINDOW_SIZE");
-        r = add(R_SCALE, K_CHOICE, W_RESTART, "Render scale",
+#ifdef __APPLE__
+        int scale_when = W_RESTART;
+#else
+        int scale_when = gfx_renderer() == RENDERER_VULKAN ? W_RESTART : W_NOW;   /* (Direct3D 11 takes it at its next present) */
+#endif
+        r = add(R_SCALE, K_CHOICE, scale_when, "Render scale",
                 "How many times 1920x1080 the game draws at: sharper on a big screen, more work for the graphics card. Auto: as many pixels as the window has.");
         if (ds.render_scale <= 0)
             snprintf(r->value, sizeof r->value, "auto");
@@ -923,9 +933,10 @@ static void build(void)
         note_env(r, "SSBU_RENDER_SCALE");
         int original = !_stricmp(display_aspect_setting(), "16:9"), locked = display_shape_locked();
         r = add(R_ASPECT, K_CHOICE, W_NOW, "Picture shape",
-                "16:9 (original): the game as made for 16:9. Wider shows the fight wider without stretching it; the fight itself stays "
-                "what 16:9 has, and the HUD stays in the middle. 21:9 and 43:18 take your monitor's exact shape on any 21:9 monitor, "
-                "32:9 on any 32:9 one; auto is always the monitor's. Online matches: 16:9. Needs the Direct3D 11 renderer for now.");
+                "16:9 (original) is the game as it was made. A wider shape shows more of the stage at the sides without stretching "
+                "anything, and fights play exactly as they do at 16:9. The HUD stays in the middle. 21:9 and 32:9 match your monitor "
+                "when it is close to that shape, and auto always uses your monitor's shape. Online matches are played at 16:9. "
+                "Works with the Direct3D 11 renderer only for now.");
         snprintf(r->value, sizeof r->value, "%s%s", display_aspect_setting(), original ? " (original)" : "");
         if (locked && !original) snprintf(r->note, sizeof r->note, "Direct3D 11 only");
         note_env(r, "SSBU_ASPECT");
@@ -1373,6 +1384,33 @@ static void change(const Row *row, int dir)
         set_display("overlay", overlay_on && *overlay_on ? "1" : "0");
         break;
     case R_SIZE:
+#ifndef __APPLE__
+    { /* the height, among those that fit the monitor at the picture's shape; the width follows the shape */
+        static const int HEIGHTS[] = {720, 900, 1080, 1440, 2160};
+        int fit[5], n = 0, i = -1;
+        for (int k = 0; k < 5; k++)
+            if (display_window_height_fits(HEIGHTS[k]) || k == 0)
+                fit[n++] = HEIGHTS[k];
+        for (int k = 0; k < n; k++)
+            if (fit[k] == ds.height)
+                i = k;
+        if (i >= 0)
+            i = cycle(i, n, dir);
+        else
+        { /* (a size typed by hand: the next one up or down) */
+            i = 0;
+            while (i < n && fit[i] < ds.height)
+                i++;
+            i = cycle(dir < 0 ? i - 1 : i, n, 0);
+        }
+        display_set_window_height(fit[i]);
+        snprintf(v, sizeof v, "%d", (int)((float)fit[i] * display_aspect() + 0.5f));
+        set_display("width", v);
+        snprintf(v, sizeof v, "%d", fit[i]);
+        set_display("height", v);
+        break;
+    }
+#else
     {
         int n = sizeof SIZES / sizeof *SIZES, i = -1;
         for (int k = 0; k < n; k++)
@@ -1393,6 +1431,7 @@ static void change(const Row *row, int dir)
         set_display("height", v);
         break;
     }
+#endif
     case R_SCALE:
     {
         static const char *const SCALES[] = {"1", "auto", "1.5", "2", "3"};
@@ -1403,12 +1442,12 @@ static void change(const Row *row, int dir)
                 i = k;
         i = i < 0 ? (dir > 0 ? 0 : n - 1) : cycle(i, n, dir);
         set_display("render_scale", SCALES[i]);
-        display_set_render_scale(VALUES[i]); /* (shown now; the renderer takes it at the next start) */
+        display_set_render_scale(VALUES[i]); /* (Direct3D 11 takes it at its next present; Vulkan and Metal at the next start) */
         break;
     }
     case R_ASPECT:
     {
-        static const char *const SHAPES[] = {"16:9", "auto", "21:9", "43:18", "32:9"};
+        static const char *const SHAPES[] = {"16:9", "auto", "21:9", "32:9"};   /* (21:9 covers 43:18 and 64:27: display_aspect) */
         int n = sizeof SHAPES / sizeof *SHAPES, i = -1;
         for (int k = 0; k < n; k++)
             if (!_stricmp(SHAPES[k], display_aspect_setting()))

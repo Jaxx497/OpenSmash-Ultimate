@@ -149,9 +149,10 @@ static const char DEFAULT_INI[] =
 #endif
     "render_scale = 1\n"
     "\n"
-    "; aspect = 16:9 | auto | width:height (e.g. 21:9, 43:18 for 3440x1440, 32:9)\n"
-    ";   The picture's shape. 16:9: the game's own. Wider: the fight is seen wider, nothing stretched,\n"
-    ";   and the fight stays exactly what 16:9 has (online too). auto: the monitor's shape.\n"
+    "; aspect = 16:9 | auto | 21:9 | 32:9 (or any width:height up to 32:9)\n"
+    ";   The picture's shape. 16:9 is the game as it was made. A wider shape shows more at the sides\n"
+    ";   without stretching anything, and fights play exactly as at 16:9. 21:9 and 32:9 match the\n"
+    ";   monitor when it is close to that shape; auto is the monitor's. Online matches are at 16:9.\n"
     "aspect = 16:9\n"
     "; view = wide | zoomed | hybrid (with a picture wider than 16:9)\n"
     ";   wide:   the 16:9 view with the sides added at the same zoom (it can show past the stage).\n"
@@ -325,6 +326,8 @@ int display_renderer(void) { load(); return cfg.renderer; }
  * matches (display_aspect_take) and, for the whole session, unless display.ini asks for Direct3D 11 by
  * name (renderer = direct3d11; auto may draw with Vulkan, not ported yet): display_shape_locked. */
 int game_fight_on(void);     /* (hle_fight_test.c) */
+static void window_follow_shape(void);   /* (the window section: a windowed window takes the new shape) */
+static volatile LONG size_pending;       /* (the menu's window size: the window's timer takes it, after an online fight) */
 int net_match_now(void);     /* (host.c: a networked match set up or under way) */
 int display_shape_locked(void) {
     static int locked = -1;
@@ -396,6 +399,7 @@ int display_aspect_take(void) {
             game_fight_on() ? ", in a fight" : "");
     shape_now = want;
     for_online = online;
+    window_follow_shape();
     return 1;
 }
 int display_view(void) { load(); return cfg.view; }
@@ -411,7 +415,7 @@ void display_set_view(int view) { load(); cfg.view = view; }   /* (at once: the 
  * only at the next start */
 static float saved_render_scale;
 static int render_scale_saved;
-void display_set_render_scale(float scale) { saved_render_scale = scale; render_scale_saved = 1; }
+void display_set_render_scale(float scale) { load(); saved_render_scale = scale; render_scale_saved = 1; cfg.render_scale = scale; }
 static int saved_renderer = -1;   /* (the same for the renderer: -1 none saved) */
 void display_set_renderer(int renderer) { saved_renderer = renderer == RENDERER_VULKAN || renderer == RENDERER_D3D11 ? renderer : RENDERER_DEFAULT; }
 int display_overlay(void) { load(); return cfg.overlay; }
@@ -484,10 +488,14 @@ static RECT windowed_rect(HWND h) {
     UINT dpi = GetDpiForWindow(h);
     MONITORINFO mi = {sizeof mi};
     GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
-    int cw = MulDiv(cfg.width, (int)dpi, 96), ch = MulDiv(cfg.height, (int)dpi, 96);
+    /* (the height is the setting; the width the picture's shape, so a wider shape gets no bars) */
+    int ch = MulDiv(cfg.height, (int)dpi, 96), cw = (int)((float)ch * display_aspect() + 0.5f);
     RECT f = frame_of(WINDOWED_STYLE, dpi);
-    int ww = cw + f.right - f.left, wh = ch + f.bottom - f.top;
     RECT wa = mi.rcWork;
+    int aw = wa.right - wa.left - (f.right - f.left), ah = wa.bottom - wa.top - (f.bottom - f.top);
+    if (cw > aw && aw > 0) { ch = (int)((float)ch * aw / cw); cw = aw; }   /* (wider than the monitor: smaller, same shape) */
+    if (ch > ah && ah > 0) { cw = (int)((float)cw * ah / ch); ch = ah; }
+    int ww = cw + f.right - f.left, wh = ch + f.bottom - f.top;
     int x = wa.left + ((wa.right - wa.left) - ww) / 2, y = wa.top + ((wa.bottom - wa.top) - wh) / 2;
     if (x < wa.left) x = wa.left;
     if (y < wa.top) y = wa.top;
@@ -527,6 +535,30 @@ static void set_mode(HWND h, int mode) {
 /* (the window thread) the menu's choice: the window's mode now, and F11's full-screen form */
 #define WM_DISPLAY_MODE (WM_APP + 1)
 #define WM_DISPLAY_SHOW (WM_APP + 2)
+#define WM_DISPLAY_SIZE (WM_APP + 3)
+
+/* The windowed size (display.ini height; the width follows the picture's shape), now if windowed, else
+ * the next time it is: the menu's Window size, and a new picture shape. */
+static void window_follow_shape(void) {
+    HWND h = (HWND)gfx_window_handle();
+    if (h) PostMessageW(h, WM_DISPLAY_SIZE, 0, 0);
+}
+void display_set_window_height(int height) {
+    load();
+    cfg.height = height;
+    cfg.width = (int)((float)height * display_aspect() + 0.5f);
+    InterlockedExchange(&size_pending, 1);   /* (the window's timer takes it, never inside an online fight) */
+}
+/* Whether a windowed window of this height (at 100% scaling) fits the game window's monitor at the shape now. */
+int display_window_height_fits(int height) {
+    HWND h = (HWND)gfx_window_handle();
+    MONITORINFO mi = {sizeof mi};
+    if (!h || !GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi)) return height <= 1080;
+    UINT dpi = GetDpiForWindow(h);
+    RECT f = frame_of(WINDOWED_STYLE, dpi ? dpi : 96);
+    int ch = MulDiv(height, (int)(dpi ? dpi : 96), 96), cw = (int)((float)ch * display_aspect() + 0.5f);
+    return cw + f.right - f.left <= mi.rcWork.right - mi.rcWork.left && ch + f.bottom - f.top <= mi.rcWork.bottom - mi.rcWork.top;
+}
 
 void display_set_mode(int mode) {
     load();
@@ -617,6 +649,25 @@ int display_message(HWND h, UINT msg, WPARAM w, LPARAM l, LRESULT *result) {
         set_mode(h, (int)w);
         *result = 0;
         return 1;
+    case WM_DISPLAY_SIZE:   /* (window_follow_shape) */
+        have_place = 0;     /* (back to windowed later: the new size, not the old placement) */
+        if (current_mode == MODE_WINDOWED && !win_headless()) {
+            RECT now, r = windowed_rect(h);
+            if (GetWindowRect(h, &now)) {   /* (around the window's centre, kept on its monitor's work area) */
+                MONITORINFO mi = {sizeof mi};
+                GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+                int ww = r.right - r.left, wh = r.bottom - r.top;
+                int x = (now.left + now.right - ww) / 2, y = (now.top + now.bottom - wh) / 2;
+                if (x + ww > mi.rcWork.right) x = mi.rcWork.right - ww;
+                if (y + wh > mi.rcWork.bottom) y = mi.rcWork.bottom - wh;
+                if (x < mi.rcWork.left) x = mi.rcWork.left;
+                if (y < mi.rcWork.top) y = mi.rcWork.top;
+                r = (RECT){x, y, x + ww, y + wh};
+            }
+            SetWindowPos(h, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        *result = 0;
+        return 1;
     case WM_DISPLAY_SHOW: {
         /* Once: ensure taskbar style and a single raise. Do not keep forcing foreground. */
         LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
@@ -685,6 +736,7 @@ int display_message(HWND h, UINT msg, WPARAM w, LPARAM l, LRESULT *result) {
         return 0;
     case WM_TIMER:
         if (w != 1) return 0;
+        if (size_pending && !(net_match_now() && game_fight_on()) && InterlockedExchange(&size_pending, 0)) window_follow_shape();
         if (win_headless()) {   /* (put back off screen if anything moved it) */
             RECT r;
             if (GetWindowRect(h, &r) && (r.left != -32000 || r.top != -32000))
@@ -725,6 +777,9 @@ void display_note_size(unsigned w, unsigned h) {
     if (w && h && w < 0x8000 && h < 0x10000) InterlockedExchange(&pending_size, (LONG)(w << 16 | h));
 }
 void display_note_refresh(int hz) { InterlockedExchange(&refresh_hz, hz); }
+static void window_follow_shape(void) {}   /* ponytail: SDL's window keeps its size on Linux and macOS (bars) */
+void display_set_window_height(int height) { load(); cfg.height = height; cfg.width = (int)((float)height * 16 / 9 + 0.5f); }
+int display_window_height_fits(int height) { return height <= 1080; }
 #endif
 
 /* ---- pacing ----------------------------------------------------------------------------- */
