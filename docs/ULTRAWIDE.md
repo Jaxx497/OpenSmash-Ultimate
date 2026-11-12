@@ -22,7 +22,7 @@ do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
 | Fighter in a bubble | custom: by view | drawn while inside the picture | hidden (the game's) | hidden (the game's) | to do | 2026-11-11: in the wide view the fighter is still inside the picture, so it should simply stay visible. |
 | Triple arrows | custom: by view (to confirm) | follow the bubble | follow the bubble | follow the bubble | to do | 2026-11-11/12: they point to an off-screen fighter, so they go where the bubble goes; the owner checks them in play. |
 | Damage meters | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
-| Timer | custom: player setting | left, right, original, center or hidden | same | same | to decide | 2026-11-12: a setting with those choices. "Original" is where 16:9 puts it, grown with the picture (owner: "it should grow with the camera"): at 32:9 it keeps its place and proportion in the 16:9 view but is drawn larger with the wider picture. |
+| Timer | custom: player setting | left, right, original, center or hidden | same | same | to decide | 2026-11-12: a setting with those choices. "Original" is where 16:9 puts it, scaled with the screen's size, not the camera's zoom (owner, 2026-11-12): the same size on one monitor at every shape, bigger on a bigger screen. |
 | Minimap | - | - | - | to decide | Not looked at yet. |
 | Pause menu | - | - | - | to decide | Not looked at yet. |
 | Training mode elements | - | - | - | to decide | Not looked at yet. |
