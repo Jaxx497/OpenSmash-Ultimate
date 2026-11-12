@@ -732,7 +732,9 @@ static void wide_copy(Cpu *c) {
             inv[0] = 1 / pr[0];
         }
     }
-    if (!cam || dst != cam + 0x1d0 || !in_fight() || !view_on()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; shadow_k = 1; return; }
+    if (!cam || dst != cam + 0x1d0) return;   /* (another camera's copy: the views' state is left alone, or the zoom
+                                                * was cleared each frame and a pause, which stops the shadow camera, kept 1) */
+    if (!in_fight() || !view_on()) { wide_now[0] = wide_now[1] = wide_now[2] = 0; shadow_k = 1; return; }
     static int cycle = -1;   /* SSBU_VIEW_CYCLE=<n> (test): the next view every n fight frames, as the menu would */
     if (cycle < 0) { const char *e = getenv("SSBU_VIEW_CYCLE"); cycle = e ? atoi(e) : 0; }
     if (cycle > 0) { long long f = fight_test_frame0(); if (f > 0) display_set_view((int)(f / cycle % 3)); }
@@ -745,12 +747,12 @@ static void wide_copy(Cpu *c) {
     {   /* Paused: the pause shot starts from the picture's view, whose offset fades out as the player
          * moves the pause camera from where it started (gone a quarter of the camera's distance away):
          * kept whole, it would push a zoomed-in pause shot off what it shows. */
-        static int paused; static float eye0[3], dist0, now0[3], k0, k_fight = 1;
+        static int paused; static float eye0[3], dist0, now0[3], k0;
         const float *eye = P(float, dst + 0xb0), *at = P(float, dst + 0x100);
         if (!line_on()) {
-            if (!paused) {   /* (the zoom as the last fight frame had it: the shadow camera stops with the fight) */
+            if (!paused) {
                 paused = 1;
-                memcpy(eye0, eye, 12); memcpy(now0, wide_now, 12); k0 = k_fight;
+                memcpy(eye0, eye, 12); memcpy(now0, wide_now, 12); k0 = shadow_k;
                 dist0 = sqrtf((eye[0] - at[0]) * (eye[0] - at[0]) + (eye[1] - at[1]) * (eye[1] - at[1]) + (eye[2] - at[2]) * (eye[2] - at[2]));
             }
             float moved = sqrtf((eye[0] - eye0[0]) * (eye[0] - eye0[0]) + (eye[1] - eye0[1]) * (eye[1] - eye0[1]) + (eye[2] - eye0[2]) * (eye[2] - eye0[2]));
@@ -758,7 +760,7 @@ static void wide_copy(Cpu *c) {
             if (fade < 0) fade = 0;
             for (int i = 0; i < 3; i++) wide_now[i] = now0[i] * fade;
             shadow_k = 1 + (k0 - 1) * fade;
-        } else { paused = 0; k_fight = shadow_k; }
+        } else paused = 0;
     }
     wide_now_x = wide_now[0]; wide_now_y = wide_now[1]; wide_now_z = wide_now[2];
     wide_applied.on = 0;   /* (the copy wrote fresh values: nothing of the last frame to put back) */

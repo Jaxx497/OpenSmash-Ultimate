@@ -83,6 +83,11 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
       has its centre up to 1.3 units past the picture's edge (half the body shown); once, for 2 frames,
       a fighter high up was 1.4 units above the picture's top. No fighter is hidden without a bubble.
 
+- [x] **Zoomed pause zooms out** (owner, 2026-11-12, Bridge of Eldin): the renderer's copies for other
+      cameras cleared the views' zoom each frame, and the zoomed view's shadow camera, which set it again
+      every fight frame, stops in a pause, so the zoom fell to 1 the moment the game paused. The other
+      cameras' copies leave the views alone now.
+
 ## Renderers
 
 - [ ] **Vulkan port**: the squeeze, 2D clip, bubble shift and shape-change surface rebuild in shared code
