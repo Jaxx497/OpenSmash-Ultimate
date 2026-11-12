@@ -913,10 +913,11 @@ static void build(void)
         r = add(R_SIZE, K_CHOICE, W_RESTART, "Window size", "The size of the game's window when it is not full screen, in points (on a Retina display, a point is 2 x 2 pixels).");
         snprintf(r->value, sizeof r->value, "%d x %d", ds.width, ds.height);
 #else
-        r = add(R_SIZE, K_CHOICE, W_NOW, "Window size",
+        r = add(R_SIZE, ds.mode == DISPLAY_WINDOWED ? K_CHOICE : K_INFO, W_NOW, "Window size",
                 "The size of the game's window when it is not full screen, at 100% Windows scaling. The width follows the picture shape, "
                 "and sizes too big for your monitor are left out.");
         snprintf(r->value, sizeof r->value, "%d x %d", (int)((float)ds.height * display_aspect() + 0.5f), ds.height);
+        if (ds.mode != DISPLAY_WINDOWED) snprintf(r->note, sizeof r->note, "windowed only");
 #endif
         note_env(r, "SSBU_WINDOW_SIZE");
 #ifdef __APPLE__
@@ -929,7 +930,7 @@ static void build(void)
         if (ds.render_scale <= 0)
             snprintf(r->value, sizeof r->value, "auto");
         else
-            snprintf(r->value, sizeof r->value, "%g", ds.render_scale);
+            snprintf(r->value, sizeof r->value, "%gx", ds.render_scale);
         note_env(r, "SSBU_RENDER_SCALE");
         int original = !_stricmp(display_aspect_setting(), "16:9"), locked = display_shape_locked();
         r = add(R_ASPECT, K_CHOICE, W_NOW, "Picture shape",

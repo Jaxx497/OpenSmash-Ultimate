@@ -328,6 +328,8 @@ int display_renderer(void) { load(); return cfg.renderer; }
 int game_fight_on(void);     /* (hle_fight_test.c) */
 static void window_follow_shape(void);   /* (the window section: a windowed window takes the new shape) */
 static volatile LONG size_pending;       /* (the menu's window size: the window's timer takes it, after an online fight) */
+static volatile LONG window_sizing;      /* (Windows: the window or its edge being dragged) */
+int display_window_sizing(void) { return window_sizing; }
 int net_match_now(void);     /* (host.c: a networked match set up or under way) */
 int display_shape_locked(void) {
     static int locked = -1;
@@ -649,6 +651,10 @@ int display_message(HWND h, UINT msg, WPARAM w, LPARAM l, LRESULT *result) {
         set_mode(h, (int)w);
         *result = 0;
         return 1;
+    case WM_ENTERSIZEMOVE:  /* (a drag of the window or its edge: the render scale's auto waits for its end) */
+    case WM_EXITSIZEMOVE:
+        InterlockedExchange(&window_sizing, msg == WM_ENTERSIZEMOVE);
+        return 0;
     case WM_DISPLAY_SIZE:   /* (window_follow_shape) */
         have_place = 0;     /* (back to windowed later: the new size, not the old placement) */
         if (current_mode == MODE_WINDOWED && !win_headless()) {

@@ -287,6 +287,7 @@ static int scale_skipped(u32 w, u32 h) {
 static float scale_wanted(void) {
     float scale = display_render_scale();
     DXGI_SWAP_CHAIN_DESC1 scd;
+    if (scale == 0 && display_window_sizing() && render_scale > 0) return render_scale;   /* (auto: once the drag ends) */
     if (scale == 0) {
         scale = 1;
         if (swapchain && SUCCEEDED(IDXGISwapChain1_GetDesc1(swapchain, &scd))) {

@@ -85,5 +85,6 @@ void display_set_latency(int frames);
 int display_take_latency(void);           /* the renderer, at a present: a new latency, or 0 */
 void display_set_render_scale(float scale);   /* (Direct3D 11 takes it at its next present; the others at the next start) */
 void display_set_window_height(int height);   /* the windowed height; the width follows the picture shape (Windows: now) */
-int display_window_height_fits(int height);   /* whether that windowed height fits the game window's monitor at the shape now */
+int display_window_height_fits(int height);
+int display_window_sizing(void);              /* whether the window or its edge is being dragged now (Windows) */   /* whether that windowed height fits the game window's monitor at the shape now */
 void display_set_renderer(int renderer);      /* (the same: RENDERER_*, which back end draws from the next start) */

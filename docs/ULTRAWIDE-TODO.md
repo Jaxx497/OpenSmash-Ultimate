@@ -21,7 +21,7 @@ Order agreed with the owner (2026-11-11): HUD work first, then the Vulkan port.
 - [x] **Window size options fit the picture shape and the monitor**: the menu offers heights 720 to 2160
       whose width (height x shape) fits the monitor's work area; display.ini keeps width and height.
 - [x] **Render scale auto follows the shape**: chosen again whenever the window's picture changes size
-      (ponytail: also while a window is dragged, every frame of the drag).
+      (not while the window or its edge is being dragged: at the end of the drag).
 - [x] **Windowed: the window follows the shape**: same height, new width, around the same centre; shrunk to
       fit the monitor if wider.
 - [ ] **The online hold ends at the main menu** (now: menus can stay 16:9 after an online match until the
