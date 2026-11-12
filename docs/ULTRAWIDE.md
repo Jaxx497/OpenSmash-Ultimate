@@ -22,11 +22,12 @@ do is in [ULTRAWIDE-TODO.md](ULTRAWIDE-TODO.md).
 | Fighter in a bubble | custom: by view | drawn while inside the picture | hidden (the game's) | hidden (the game's) | to do | 2026-11-11: in the wide view the fighter is still inside the picture, so it should simply stay visible. |
 | Triple arrows | custom: by view (to confirm) | follow the bubble | follow the bubble | follow the bubble | to do | 2026-11-11/12: they point to an off-screen fighter, so they go where the bubble goes; the owner checks them in play. |
 | Damage meters | static | 16:9 view | 16:9 view | 16:9 view | done | 2026-11-11: left with the 16:9 view. |
-| Timer | custom: player setting | left, right, original, center or hidden | same | same | to decide | 2026-11-12: a setting with those choices. "Original" is where 16:9 puts it, scaled with the screen's size, not the camera's zoom (owner, 2026-11-12): the same size on one monitor at every shape, bigger on a bigger screen. |
-| Minimap | - | - | - | to decide | Not looked at yet. |
-| Pause menu, pause camera controls | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): same size as at 16:9 on that screen, never stretched, only shifted: an element at the 16:9 view's side (the PAUSE label, the menu box, the camera controls list, the Battle Camera box) moves out by the extra width to the picture's side, an element in the middle stays there. |
+| Timer | custom: player setting | right, center, left or hidden | same | same | decided, to do | 2026-11-12 (owner): "Timer position" on the Display page. Right is the game's own place (top right), the default; in a wider picture it is the picture's top-right corner. Center and left are added, and hidden. Same size on one screen at every shape. |
+| Radar (the minimap square) | static (recommended, owner to confirm) | 16:9 view | 16:9 view | 16:9 view | to decide | 2026-11-12: it shows when a fighter is off-screen by the 16:9 rule, as bubbles do; recommended to stay top centre with its contents unchanged (its inner box is the 16:9 view). |
+| Pause menu, pause camera controls | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): same size as at 16:9 on that screen, never stretched, only moved: each panel goes to the side it is laid out against (the pause menu flush with the picture's right edge, P1 PAUSE with its left, as 16:9 has them with the screen's). First try: the game's layouts told the screen is wider, so their own anchors place each panel whole; else whole panels moved toward their side by the extra width. |
 | Training mode elements | dynamic (most; exceptions to confirm in play) | at the picture's sides | same | same | to do | 2026-11-12 (owner): as the pause menu. |
-| Menus, loading screens | - | - | - | to do | The side areas are to be filled (black, or a blur of the middle: owner's call). |
+| Battle Camera frame (camera controls) | dynamic | marks the whole picture | same | same | to do | 2026-11-12 (owner): the frame shows the shot, so it marks everything the picture shows. |
+| Menus, loading screens | static | black side areas | same | same | done (first PR) | 2026-11-12 (owner): black for the first PR; a blurred fill after it. |
 
 ## Settings and switches (Direct3D 11 only: `renderer = direct3d11`)
 

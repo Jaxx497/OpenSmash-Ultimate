@@ -105,6 +105,10 @@ _Avoid_: moving, floating
 Placed by a rule that changes with the circumstances: the view, the mode (training) or a player setting. A custom element's ruling always says what it depends on and why. Examples: magnifying bubbles (by view), the timer (a player setting).
 _Avoid_: special, conditional
 
+**Radar**:
+The small box the game shows when a fighter is off-screen: the stage's area with the 16:9 view marked in it and a dot for each fighter.
+_Avoid_: minimap, map
+
 **Tag**:
 The marker over a fighter naming its player: P1, P2, CPU.
 _Avoid_: player tag, label, nameplate
