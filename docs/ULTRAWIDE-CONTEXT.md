@@ -10,7 +10,12 @@ fight a 16:9 screen would have. The working notes and the map of the game's code
 
 **Picture shape**:
 The width over the height of what the player sees, e.g. 32:9 or 43:18; from 16:9 up to 32:9, the widest supported. It can change at any time offline, and is 16:9 for online matches.
+"21:9" is a marketing name, not one shape: 2560x1080 is 64:27 (2.37), 3440x1440 is 43:18 (2.39), true 21:9 is 2.33. So the menu's wider choices stand for a range and take the monitor's own shape when it falls inside it.
 _Avoid_: aspect, resolution, ratio
+
+**16:9 (original)**:
+The picture shape the game was made for: the game untouched, every view the same. The fallback to the intended display.
+_Avoid_: default, standard, off
 
 **16:9 view**:
 What a 16:9 screen would show at the same moment: the middle of the picture, framed by the game.
@@ -30,7 +35,7 @@ How the camera frames a fight for the picture shape. The player picks one; the f
 _Avoid_: camera mode, camera style
 
 **Wide view**:
-The 16:9 view with the side areas added at the same zoom: everything the fight could involve is in the picture, even past the stage.
+The game's own camera, moving and zooming as at 16:9, with the side areas added: everything the fight could involve is in the picture, even past the stage.
 _Avoid_: full view, full
 
 **Zoomed view**:
@@ -61,6 +66,10 @@ _Avoid_: dead zone, kill zone
 
 ### Fights
 
+**Online match**:
+A match played against another player's game over a network: the lobby's Online mode, a Local Wireless or relay room. Its picture is 16:9 unless the player chose the experimental unlock.
+_Avoid_: netplay, online session (a session is online whenever the lobby is connected)
+
 **Fight-identical**:
 A fight that is the same, frame for frame, as on a 16:9 screen, shown by its fight hash up to GAME!.
 _Avoid_: online-safe, deterministic, in sync
@@ -73,10 +82,14 @@ _Avoid_: out of view, hidden
 The circle the game draws for an off-screen fighter, showing that fighter and where they are.
 _Avoid_: magnifying glass, offscreen bubble, shield (the shield is a different bubble)
 
+**Triple arrows**:
+The faint arrows (▶▶▶) the game draws at the screen's edge toward an off-screen fighter.
+_Avoid_: blue arrows, chevrons
+
 ### The HUD
 
 **HUD**:
-Everything the game draws over the fight: damage meters, timer, tags, magnifying bubbles. It stays in the 16:9 view, unstretched.
+Everything the game draws over the fight: damage meters, timer, tags, magnifying bubbles. It stays in the 16:9 view, unstretched, except the off-screen markers (magnifying bubbles, and the triple arrows), which go to the picture's edge in the zoomed and hybrid views. Each element's ruling is in ULTRAWIDE.md's "HUD decisions".
 _Avoid_: UI, overlay (the overlay is the runtime's own frame-rate display)
 
 **Tag**:
