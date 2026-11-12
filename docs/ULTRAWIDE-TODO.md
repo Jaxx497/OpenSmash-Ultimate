@@ -77,9 +77,11 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
       for the picture's shape, but the renderer's copies for other cameras cleared that offset every
       frame, so it sat at 12% of it (100% zooms in until the fighters fill the picture, like the zoomed
       view). Owner: the game's own framing, no shift; matches the glossary's wide view.
-- [ ] **Zoomed view tighter than 16:9?** If the zoomed picture can be narrower (in the fight's space) than
-      the 16:9 view, a fighter can leave the picture without being off-screen by the game's rule: no
-      bubble, not seen. The owner records a replay for this edge case; check it in the zoomed view.
+- [x] **Zoomed view tighter than 16:9?** Checked 2026-11-12 on the owner's Ganondorf vs Pichu replay
+      (Bridge of Eldin, 32:9 zoomed), every frame to GAME!: the picture is always shorter than the 16:9
+      view (zooming in is the view), and it stops at the stage's edge, so a fighter standing on the ledge
+      has its centre up to 1.3 units past the picture's edge (half the body shown); once, for 2 frames,
+      a fighter high up was 1.4 units above the picture's top. No fighter is hidden without a bubble.
 
 ## Renderers
 
