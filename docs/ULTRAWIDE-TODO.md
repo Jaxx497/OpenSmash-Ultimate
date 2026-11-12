@@ -96,6 +96,13 @@ Rule for every row: once turned on it stays on; any change takes effect at the n
 - [ ] **Vulkan port**: the squeeze, 2D clip, bubble shift and shape-change surface rebuild in shared code
       both back ends call; Vulkan proven by the replay fight hash (renderer-independent) and by captures of
       the same frames from both back ends compared. Then the lock becomes "Direct3D 11 or Vulkan".
+      Scoped 2026-11-12 (waiting for upstream's Vulkan fixes to settle, #330 and after): `gpu_vk.c` has the
+      same seams as `gpu_d3d11.c` - `scaled_size` (a 16:9 target widened by the picture's widening), the
+      draw's `rt_sx`/`rt_sy` and `params.fix[0]` (the squeeze: x over the widening for 2D), the game's
+      scissor (2D clipped to the picture's reach: `hud_wide_on`), the viewport (the bubble's shift), and
+      the present (the picture's area); plus the surfaces rebuilt at a shape change (`display_aspect_take`).
+      The decisions (is this a 16:9 target, is this draw squeezed, the clip's reach, the bubble's shift)
+      move into one shared file both back ends call; each back end only applies them.
 - [ ] **Linux** (Direct3D 11 through DXVK): if making `host.c`'s Windows-only parts portable is small;
       else after the first PR.
 
