@@ -257,6 +257,8 @@ static BOOL CALLBACK load_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
         else if (!_stricmp(key, "render_scale")) parse_render_scale(value);
         else if (!_stricmp(key, "renderer")) parse_renderer(value, path);
         else if (!_stricmp(key, "volume")) {}   /* (the master volume: ipc_audio.c's audio_master_volume reads it) */
+        else if (!_stricmp(key, "game_music") || !_stricmp(key, "music") || !_stricmp(key, "music_volume") ||
+                 !_stricmp(key, "music_shuffle") || !_stricmp(key, "music_source") || !_stricmp(key, "music_toast")) {}   /* (hle_music.c and hle_music_player.c read them) */
         else fprintf(stderr, "[display] %s: unknown setting '%s'\n", path, key);
     }
     if (f) fclose(f);
