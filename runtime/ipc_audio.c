@@ -21,6 +21,7 @@
 
 #include "ipc.h"
 #include "audio.h"
+#include "music.h"
 #include "display.h"    /* (display_ini_path) */
 #include "settings.h"
 #ifdef _WIN32
@@ -112,6 +113,8 @@ static void feed(u8 *out, u32 len) {
     }
     int any = release_due();
     LeaveCriticalSection(&audio.lock);
+    /* the player's music over the game's sound, silence included: it plays on through loading screens */
+    music_mix((i16 *)out, len / FRAME, audio_master_volume());
     if (any) SetEvent(played_event);
     if (dry && (dry <= 10 || dry % 100 == 0 || audio_log))
         fprintf(stderr, "[audio] the game's sound ran out at %.3f s (%llu times so far): waiting for %u ms of it\n",

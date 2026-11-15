@@ -1402,7 +1402,7 @@ def link(dirs, exe, rt_dir=None, steps=None):
             why[reason] += 1
             jobs.setdefault(None if flags is None else tuple(flags), []).append((src, obj, opt))
     rt_flags = [*cc.CFLAGS, "/D" + game_dll.DEFINE] if GAME_DLL else None   # (its runtime loads the library: runtime/host.c)
-    sources = [n for n in os.listdir(cc.RUNTIME) if re.fullmatch(r"(host|kernel|gpu\w*|hle\w*|ipc\w*|debug\w*|net\w*)\.c", n)]
+    sources = [n for n in os.listdir(cc.RUNTIME) if re.fullmatch(r"(host|kernel|gpu\w*|hle\w*|ipc\w*|debug\w*|net\w*|music)\.c", n)]
     for n in sources:
         want(os.path.join(cc.RUNTIME, n), os.path.join(rt_dir, n[:-2] + ".obj"), "/O2", rt_flags)
     # BC7 and the other block formats, decoded on the CPU for UI icons (runtime/gpu_d3d11.c). Found beside

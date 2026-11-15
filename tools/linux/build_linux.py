@@ -57,7 +57,8 @@ GEN = os.path.join(OUT, "gen")
 
 RUNTIME_INCLUDES = ["-I", os.path.join(RUNTIME, "linux", "include"), "-I", os.path.join(DXVK_INCLUDE, "windows"),
                     "-I", os.path.join(DXVK_INCLUDE, "directx"), "-I", os.path.join(SYSROOT, "usr", "include", "SDL2"),
-                    "-I", os.path.join(VKD3D_SRC, "include"), "-I", GEN]
+                    "-I", os.path.join(VKD3D_SRC, "include"), "-I", GEN,
+                    "-I", os.path.join(REPO, "third_party", "ffmpeg", "include")]
 RUNTIME_DEFINES = ["-D_GNU_SOURCE", "-D_REENTRANT", "-DSSBU_HAVE_OPUS", "-DSSBU_HAVE_VPX", "-DSSBU_HAVE_SDL2"]
 # --game-dll (tools/game_dll.py): the game's modules in LIBRARY, which the program's runtime, compiled to
 # (game_dll.DEFINE), loads; the library's objects of its own in LIBRARY_OBJ. A shared library's code is
@@ -262,7 +263,7 @@ def runtime_jobs():
                                     + ([font] if os.path.exists(font) else []))
     record, why = objcache.Record(rt_out), Counter()
     sources = [os.path.join(RUNTIME, n) for n in sorted(os.listdir(RUNTIME))
-               if re.fullmatch(r"(host|kernel|gpu\w*|hle\w*|ipc\w*|net\w*|debug_watchdog)\.c", n)]
+               if re.fullmatch(r"(host|kernel|gpu\w*|hle\w*|ipc\w*|net\w*|music|debug_watchdog)\.c", n)]
     sources += [os.path.join(RUNTIME, "linux", n) for n in sorted(os.listdir(os.path.join(RUNTIME, "linux")))
                 if n.endswith((".c", ".cpp"))]
     # ssbu-recomp's block-texture decoder (gpu_d3d11.c's tex_decode_rgba8), as tools/recomp.py links it
