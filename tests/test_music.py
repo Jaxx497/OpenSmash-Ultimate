@@ -1,4 +1,4 @@
-"""The custom-music player engine (runtime/music.c), without the game: tools/dev/musictest.c plays a music
+"""The custom-music player engine (runtime/hle_music_player.c), without the game: tools/dev/musictest.c plays a music
 folder through the engine's mixing function and writes what the output thread would play to a WAV file, and
 this checks that file. Needs the FFmpeg DLLs and ffmpeg.exe (python tools/ffmpeg_fetch.py --tool, in
 deps/ffmpeg/bin; the game never uses ffmpeg.exe, it only makes the test files here) and clang-cl; skipped

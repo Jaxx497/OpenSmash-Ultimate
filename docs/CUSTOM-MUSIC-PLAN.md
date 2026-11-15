@@ -51,7 +51,7 @@ The original plan:
 
 ## Step 1: the player engine (built; no menu yet)
 
-`runtime/music.c` and `runtime/music.h` play the player's own files through the game's own audio output, decoded
+`runtime/hle_music_player.c` and `runtime/music.h` play the player's own files through the game's own audio output, decoded
 with FFmpeg. Nothing in the game changes while `music` is off, and without the FFmpeg DLLs the log says so once and
 the game's music is left alone.
 
@@ -123,7 +123,7 @@ API for the menu (`runtime/music.h`): on/off, volume, shuffle, source, next, pre
 flag and their name), `music_now` (state, title, artist, position and length in seconds), `music_play_track`.
 
 Tests:
-- `tools/dev/musictest.c` includes `music.c` and drives it without the game: it plays the `music\` folder of `--game`,
+- `tools/dev/musictest.c` includes `hle_music_player.c` and drives it without the game: it plays the `music\` folder of `--game`,
   pulls samples as `feed()` does and writes a 48 kHz stereo WAV, with `--skip`, `--prev`, `--pause`, `--resume`,
   `--pick`, `--source` and `--now` at given times, `--slow MS` (the player sleeps after every packet),
   `--realtime`, `--rescan`.
@@ -152,12 +152,12 @@ Not done yet: the menu (Audio tab rows for Music on/off, volume, shuffle, next/p
 new settings back to `display.ini`, a bigger-than-memory index (the whole library is held in memory), checking the
 Linux and macOS builds (the file is in their lists and include paths but nothing was compiled there).
 
-Build notes: `music.c` is in the runtime lists of `tools/recomp.py` (Windows), `tools/linux/build_linux.py` and
-`tools/mac/build_mac.py`, whose patterns did not match the name; `third_party/ffmpeg/include` is added to
-`cc.CFLAGS` (runtime files only) and to the Linux and macOS include lists. `GAME_CFLAGS` and
-`tools_fingerprint()` (which hashes `HLE(...)` names, `HLE_WRAP` targets, hooks and the register cache, never the
-runtime's compile flags) are unchanged, so no generated C is built again; the runtime's objects are (their keys include the
-compile command).
+Build notes: the player is `runtime/hle_music_player.c` so that the runtime's existing source patterns
+(`hle\w*`) pick it up on every platform. Adding a name to the pattern in `tools/recomp.py` would change that file,
+and `tools/recomp.py` is one of the generator sources hashed into the game-code fingerprint (`tools/modcache.py`
+GENERATOR): every game file would be generated and compiled again (hours). `third_party/ffmpeg/include` is added
+to `cc.CFLAGS` (runtime files only) and to the Linux and macOS include lists; `GAME_CFLAGS` is unchanged, so only
+the runtime's objects are compiled again.
 
 ## Step 1, the options considered: library choice (decided: FFmpeg)
 

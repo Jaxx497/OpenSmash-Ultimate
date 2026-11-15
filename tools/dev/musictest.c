@@ -1,4 +1,4 @@
-/* The custom-music player (runtime/music.c) without the game: plays the music\ folder of --game, pulling
+/* The custom-music player (runtime/hle_music_player.c) without the game: plays the music\ folder of --game, pulling
  * samples the way ipc_audio.c's feed does (music_mix on a silent game buffer), and writes what the output
  * thread would play to a 48 kHz stereo 16-bit WAV. tests/test_music.py builds and drives it.
  *
@@ -12,7 +12,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 static int slow_ms;
 #define MUSIC_STEP_HOOK() do { if (slow_ms) Sleep(slow_ms); } while (0)
-#include "../../runtime/music.c"
+#include "../../runtime/hle_music_player.c"
 
 const char *display_ini_path(void) { return "config/display.ini"; }
 const char *rt_data_dir;

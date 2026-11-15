@@ -1,4 +1,4 @@
-/* The custom-music player (music.c, docs/CUSTOM-MUSIC-PLAN.md): the player's own music files, decoded
+/* The custom-music player (hle_music_player.c, docs/CUSTOM-MUSIC-PLAN.md): the player's own music files, decoded
  * with FFmpeg (loaded at run time: without its DLLs the feature says so and the game is unaffected),
  * mixed into the game's own audio output (ipc_audio.c's feed).
  *
