@@ -827,6 +827,7 @@ static Track *track_open(const Item *it) {   /* (reached by the order, not picke
     const char *why = NULL;
     Track *t = track_try(it, &why);
     if (!t) fprintf(stderr, "[music] skipped while playing: %s: %s\n", it->path, why);
+    else fprintf(stderr, "[music] next: %s (%s)\n", it->title, it->path);   /* (opened to decode ahead: heard up to a few seconds later) */
     return t;
 }
 
