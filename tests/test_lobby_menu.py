@@ -36,6 +36,9 @@ D3D11_STAND_IN = ('typedef struct ID3D11Device ID3D11Device;\ntypedef struct ID3
                   'typedef struct ID3D11RenderTargetView ID3D11RenderTargetView;\n')
 LOBBY_PAGE = 5   # (the Lobby page's number in the menu, less one)
 NO_ANSWER = 'no answer from the lobby (A: ask again)'
+AUDIO_PAGE, FROM_PAGE, TRACKS_PAGE = 1, 10, 11   # (Audio > Playing from, and its list of one source's tracks: sub-pages)
+AUDIO_ROWS = ['Volume', 'Game music', 'Your music', 'Music volume', 'Playing from', 'Shuffle', 'Track toast', 'Now playing', 'Previous',
+              'Pause', 'Next', 'Rescan library']
 
 
 def build(folder, yuzu=False):
@@ -379,7 +382,7 @@ class Pages(MenuTest):
                    'Render scale'] + (['Graphics card'] if os.name == 'nt' else []) + (['Renderer'] if sys.platform != 'darwin' else [])
         self.assertEqual(m.labels(), display)
         m.type('2')
-        self.assertEqual(m.labels(), ['Volume', 'Game music'])
+        self.assertEqual(m.labels(), AUDIO_ROWS)
         m.type('3')
         self.assertEqual(m.labels(), ['Controllers', 'Rumble', 'Keyboard plays as', 'Keyboard keys...', 'Pads when not focused',
                                       'Open controllers.ini'])
@@ -635,6 +638,246 @@ class Pad(MenuTest):
         self.assertNotIn(labels[0], drawn)   # (scrolled past)
         m.pad('B')
         self.assertEqual(m.labels()[3], 'Keyboard keys...')
+
+
+class Audio(MenuTest):
+    """The Audio page's music rows and the "Playing from" picker, over a made-up engine (lobbymenutest.c's `music`
+    commands): what each row shows, calls and saves in display.ini, and the new-track message."""
+    def audio(self):
+        m = self.menu()
+        m.key('ESC')
+        m.type('2')
+        return m
+
+    def ini(self, m):
+        out = {}
+        p = m.dir / 'display.ini'
+        for line in (p.read_text().splitlines() if p.exists() else []):
+            if '=' in line:
+                k, v = line.split('=', 1)
+                out[k.strip()] = v.strip()
+        return out
+
+    def state(self, m):
+        head, source, played = m.ask('musicstate').split('|', 2)
+        enabled, volume, shuffle, paused, game, nxt, prev, rescan = map(int, head.split()[1:])
+        return dict(enabled=enabled, volume=volume, shuffle=shuffle, paused=paused, game=game, next=nxt, prev=prev, rescan=rescan,
+                    source=source, played=played)
+
+    def test_rows(self):
+        m = self.audio()
+        self.assertEqual(m.labels(), AUDIO_ROWS)
+        v = {r['label']: r['value'] for r in m.rows()}
+        self.assertEqual((v['Your music'], v['Music volume'], v['Playing from'], v['Shuffle'], v['Track toast'], v['Now playing']),
+                         ('off', '70%', 'Everything', 'on', 'on', 'Nothing'))
+        for r in m.rows():
+            self.assertTrue(r['help'], r['label'])   # (every row says what it does)
+        self.assertEqual(m.row('Pause')['note'], 'turn on Your music')   # (the buttons say why they do nothing)
+
+    def test_your_music_switches_the_games_music(self):
+        m = self.audio()
+        m.go_to('Your music')
+        m.key('RIGHT')
+        self.assertEqual((self.state(m)['enabled'], self.state(m)['game']), (1, 0))
+        self.assertEqual((m.row('Your music')['value'], m.row('Game music')['value']), ('on', 'off'))
+        self.assertEqual((self.ini(m)['music'], self.ini(m)['game_music']), ('1', '0'))
+        self.assertEqual(m.row('Pause')['note'], '')
+        m.key('LEFT')
+        self.assertEqual((self.state(m)['enabled'], self.state(m)['game']), (0, 1))
+        self.assertEqual((m.row('Your music')['value'], m.row('Game music')['value']), ('off', 'on'))
+        self.assertEqual((self.ini(m)['music'], self.ini(m)['game_music']), ('0', '1'))
+        m.key('ENTER')   # (A turns it on, too)
+        self.assertEqual(self.state(m)['enabled'], 1)
+
+    def test_ffmpeg_missing(self):
+        m = self.audio()
+        m.ok('music missing 1')
+        m.go_to('Your music')
+        m.key('RIGHT')
+        self.assertEqual(self.state(m)['enabled'], 0)
+        self.assertEqual(m.row('Your music')['value'], 'off')
+        self.assertEqual(m.row('Your music')['note'], 'FFmpeg not found')
+        self.assertEqual(m.row('Now playing')['value'], 'FFmpeg not found: custom music is off')
+        self.assertEqual(m.row('Next')['note'], 'FFmpeg not found')
+        self.assertEqual(self.ini(m)['music'], '0')
+        self.assertEqual(self.state(m)['game'], 1)   # (the game's music is left alone)
+
+    def test_volume_and_toggles_saved(self):
+        m = self.audio()
+        m.go_to('Music volume')
+        m.key('RIGHT')
+        self.assertEqual((self.state(m)['volume'], m.row('Music volume')['value'], self.ini(m)['music_volume']), (75, '75%', '75'))
+        m.key('LEFT', 3)
+        self.assertEqual((self.state(m)['volume'], self.ini(m)['music_volume']), (60, '60'))
+        m.key('RIGHT', 8)   # (up to 100, then round to 0)
+        self.assertEqual(self.state(m)['volume'], 100)
+        m.key('RIGHT')
+        self.assertEqual(self.state(m)['volume'], 0)
+        m.go_to('Shuffle')
+        m.key('RIGHT')
+        self.assertEqual((self.state(m)['shuffle'], m.row('Shuffle')['value'], self.ini(m)['music_shuffle']), (0, 'off', '0'))
+        m.go_to('Track toast')
+        m.key('RIGHT')
+        self.assertEqual((m.row('Track toast')['value'], self.ini(m)['music_toast']), ('off', '0'))
+        m.key('RIGHT')
+        self.assertEqual((m.row('Track toast')['value'], self.ini(m)['music_toast']), ('on', '1'))
+
+    def test_now_playing(self):
+        m = self.audio()
+        m.ok('music enabled 1')
+        m.ok('music tracks 0')
+        self.assertEqual(m.row('Now playing')['value'], 'No music found: put files in music\\ or list folders in config\\music.ini')
+        m.ok('music scanning 1')
+        self.assertEqual(m.row('Now playing')['value'], 'Nothing')
+        m.ok('music scanning 0')
+        m.ok('music tracks 4')
+        self.assertEqual(m.row('Now playing')['value'], 'Nothing')
+        m.ok('music now 1|Rock One|Band|65|125|1')
+        self.assertEqual(m.row('Now playing')['value'], 'Rock One - Band  1:05 / 2:05')
+        self.assertEqual(m.row('Pause')['label'], 'Pause')
+        m.ok('music now 2|Solo|| 3|0|2')
+        self.assertEqual(m.row('Now playing')['value'], 'Solo  0:03 (paused)')
+        self.assertEqual(m.row('Pause'), None)
+        self.assertEqual(m.row('Resume')['label'], 'Resume')   # (the label follows the state)
+
+    def test_buttons(self):
+        m = self.audio()
+        m.go_to('Next')
+        m.key('ENTER')
+        self.assertEqual(m.row('Next')['note'], 'turn on Your music')   # (off: it says why; the real engine ignores the press)
+        m.go_to('Your music')
+        m.key('RIGHT')
+        m.go_to('Previous')
+        m.key('ENTER')
+        m.go_to('Pause')
+        m.key('ENTER')
+        self.assertEqual((self.state(m)['prev'], self.state(m)['paused']), (1, 1))
+        m.ok('music now 2|T|A|1|10|1')
+        self.assertEqual(m.row('Resume')['label'], 'Resume')
+        m.go_to('Resume')
+        m.key('ENTER')
+        self.assertEqual(self.state(m)['paused'], 0)
+        m.go_to('Rescan library')
+        m.key('ENTER')
+        self.assertEqual(self.state(m)['rescan'], 1)
+
+    def test_picker_lists_and_plays_from(self):
+        m = self.audio()
+        m.go_to('Playing from')
+        m.key('ENTER')
+        self.assertEqual(m.page()[1], FROM_PAGE)
+        self.assertEqual(m.labels(), ['< Back', 'Everything (4 tracks)', 'Jazz  (2)', 'Rock  (2)', 'mix  (2)'])
+        self.assertEqual(m.at()['label'], 'Everything (4 tracks)')   # (the cursor on what plays now)
+        self.assertEqual(m.row('Everything (4 tracks)')['note'], 'playing from here')
+        self.assertEqual([m.row(x)['value'] for x in ('Jazz  (2)', 'mix  (2)')], ['folder', 'playlist'])
+        self.assertIn('Y/Delete: its tracks', ' '.join(m.draw()))
+        m.go_to('Rock  (2)')
+        m.key('ENTER')
+        self.assertEqual(m.cursor()[0], AUDIO_PAGE)
+        self.assertEqual(m.at()['label'], 'Playing from')
+        self.assertEqual(m.at()['value'], 'Rock')
+        self.assertEqual((self.state(m)['source'], self.ini(m)['music_source']), ('C:/Music/Rock', 'C:/Music/Rock'))
+        m.key('ENTER')
+        self.assertEqual(m.row('Rock  (2)')['note'], 'playing from here')   # (opened again: the cursor starts on it)
+        self.assertEqual(m.at()['label'], 'Rock  (2)')
+        m.key('BKSP')   # (B: back to the Audio page, on "Playing from")
+        self.assertEqual((m.cursor()[0], m.at()['label']), (AUDIO_PAGE, 'Playing from'))
+        m.key('ENTER')
+        m.go_to('mix  (2)')
+        m.key('ENTER')
+        self.assertEqual((m.at()['value'], self.state(m)['source']), ('mix', 'C:/Music/mix.m3u8'))
+        m.key('ENTER')
+        m.go_to('Everything (4 tracks)')
+        m.key('ENTER')
+        self.assertEqual((m.at()['value'], self.state(m)['source']), ('Everything', ''))
+        self.assertNotIn('music_source', self.ini(m))
+
+    def test_picker_tabs_and_escape(self):
+        m = self.audio()
+        m.go_to('Playing from')
+        m.key('ENTER')
+        drawn = m.draw()
+        self.assertIn('2 Audio', drawn)
+        m.key('ESC')
+        self.assertEqual(m.page()[0], 0)   # (closed)
+        m.key('ESC')
+        self.assertEqual(m.page()[1], AUDIO_PAGE)   # (opened again on the page it belongs to)
+        m.go_to('Playing from')
+        m.key('ENTER')
+        m.key('TAB')
+        self.assertEqual(m.page()[1], AUDIO_PAGE)
+
+    def test_tracks_of_a_source(self):
+        m = self.audio()
+        m.go_to('Playing from')
+        m.key('ENTER')
+        m.go_to('Jazz  (2)')
+        m.pad('Y')
+        self.assertEqual(m.page()[1], TRACKS_PAGE)
+        self.assertEqual(m.labels(), ['< Back', 'Jazz One', 'Broken Song'])
+        self.assertEqual([m.row(x)['value'] for x in ('Jazz One', 'Broken Song')], ['Miles  2:05', ''])
+        self.assertEqual(m.at()['label'], 'Jazz One')
+        self.assertIn('Up/Down: choose   A/Enter: play this track', ' '.join(m.draw()))
+        m.go_to('Broken Song')
+        m.key('ENTER')   # (a broken track picked by hand: the engine's reason, and the list stays)
+        self.assertEqual(m.toast(), 'Couldn\'t play "Broken Song": the file doesn\'t open')
+        self.assertEqual((m.page()[1], m.at()['label']), (TRACKS_PAGE, 'Broken Song'))
+        self.assertEqual(self.state(m)['played'], '')
+        m.go_to('Jazz One')
+        m.pad('A')
+        self.assertEqual(m.cursor()[0], AUDIO_PAGE)
+        self.assertEqual(self.state(m)['played'], 'C:/Music/Jazz/1.mp3')
+        self.assertEqual(m.toast(), '')
+        self.assertEqual(self.state(m)['source'], '')   # (a track picked by hand does not change the source)
+        m.go_to('Playing from')
+        m.key('ENTER')
+        m.go_to('Rock  (2)')
+        m.key('DEL')   # (the keyboard's Y)
+        self.assertEqual(m.labels(), ['< Back', 'Rock One', 'Rock Two'])
+        self.assertEqual(m.row('Rock One')['value'], 'Band ?  1:02:05')   # (the overlay's font: ASCII)
+        m.key('BKSP')   # (B: back to the sources, on the one opened)
+        self.assertEqual((m.page()[1], m.at()['label']), (FROM_PAGE, 'Rock  (2)'))
+        m.go_to('mix  (2)')
+        m.pad('Y')
+        self.assertEqual(m.labels(), ['< Back', 'Rock Two', 'Jazz One'])   # (a playlist's own order)
+        m.go_to('< Back')
+        m.key('ENTER')
+        self.assertEqual((m.page()[1], m.at()['label']), (FROM_PAGE, 'mix  (2)'))
+
+    def test_track_message(self):
+        m = self.menu()   # (the menu stays closed)
+        m.ok('music enabled 1')
+        m.ok('music now 1|Rock One|Band|0|100|5')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), 'Now playing: Rock One - Band')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), '')   # (the same track: once)
+        m.ok('music now 1|Solo||0|100|6')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), 'Now playing: Solo')
+        m.key('ESC')
+        m.type('2')
+        m.go_to('Track toast')
+        m.key('RIGHT')   # (off)
+        m.toast()
+        m.ok('music now 1|Third|X|0|100|7')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), '')
+        m.go_to('Track toast')
+        m.key('RIGHT')
+        m.ok('music now 1|Fourth|X|0|100|8')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), 'Now playing: Fourth - X')
+
+    def test_track_message_off_in_ini(self):
+        m = self.menu(files={'display.ini': 'music_toast = 0\n'})
+        m.ok('music enabled 1')
+        m.ok('music now 1|Rock One|Band|0|100|5')
+        m.frames(0.4)
+        self.assertEqual(m.toast(), '')
+        m.key('ESC')
+        m.type('2')
+        self.assertEqual(m.row('Track toast')['value'], 'off')
 
 
 class Keyboard(MenuTest):

@@ -49,6 +49,65 @@ The original plan:
    switching it back on in a match brings the music back; the options menu's music slider still works
    when on.
 
+## Step 3: the menu (built; tested with a made-up engine, not yet seen in the game)
+
+`runtime/gpu_menu.c` (the settings popup). Audio tab, under Volume and Game music, in this order: Your music
+(on turns Game music off, off turns it back on; both `music` and `game_music` are saved), Music volume (0-100 in
+steps of 5), Playing from (A opens the picker), Shuffle, Track toast, Now playing, Previous, Pause / Resume
+(the label follows the state), Next, Rescan library. Every change applies at once and is saved to `display.ini`
+(`music`, `music_volume`, `music_shuffle`, `music_source` (the key is removed for Everything), `music_toast`)
+the way Volume saves `volume`. The menu has no greyed style: the four buttons stay active (the engine ignores them
+while music is off) and say why in the note column ("turn on Your music" or "FFmpeg not found"); Your music says
+"FFmpeg not found" in its note when the DLLs are missing, and Now playing says it in full. Now playing is a row you
+can put the cursor on (A does nothing): the whole text, which is wider than the value column for "No music found:
+put files in music\\ or list folders in config\\music.ini", is in the help line.
+
+"Playing from" picker: a sub-page of the Audio tab (`P_MUSIC_FROM`, as Controllers has its sub-pages; the Audio tab
+stays lit). Rows: `< Back`, `Everything (N tracks)`, the folders and the playlists as `name  (N)` (value `folder` /
+`playlist`, the note `playing from here` on the current one). The cursor starts on the current source. A plays from
+the row, saves, and goes back to Audio with the cursor on Playing from; B / Backspace goes back the same way. Y (pad) or
+Delete opens the source's tracks (`P_MUSIC_TRACKS`): `< Back`, then a row a track (title, then artist and `m:ss` in the
+value column). A plays the track through `music_play_track`; if that fails its sentence is shown with `menu_toast`
+(the one error shown) and the list stays; on success it goes back to Audio with the cursor on Now playing. B goes back
+to the sources, on the one opened. Lists longer than 40 rows are paged with `Earlier ...` / `More ...` rows, as the Lobby
+page does for rooms (the track list is read from the engine when it is opened, not every frame).
+
+Track toast: `menu_toast` already draws with the menu closed (`menu_visible()` includes a message, so the overlay
+calls `menu_draw`, which draws only the message, at the bottom centre, for 4 s from its first drawn frame; both the
+Direct3D 11 and the Vulkan overlay paths ask). `music_follow()` in `menu_frame` (every frame, menu open or not; the
+engine is asked every 100 ms) compares `MusicNow.serial` with the last one seen and calls `menu_toast("Now playing:
+Title - Artist")`. The serial is a number the player gives each track as it is announced into the ring and
+`music_now` reports for the track at the read position: it changes when a track starts being heard, not when it is
+decoded. `music_toast` in `display.ini` (1 default; the Track toast row) switches it off. A message is one slot: a
+track toast replaces whatever message is showing, and a later message replaces it.
+
+The overlay's font is printable ASCII (`gpu_overlay.c`): there is no note symbol and no middle dot, so the toast is
+"Now playing: Title - Artist" and every other character of a title or artist (Japanese, accents) is drawn as `?`
+(one for each character). Showing them needs a bigger font atlas.
+
+Engine additions (`runtime/music.h`): `MusicNow.serial`; `music_ffmpeg_missing()` (music was tried and FFmpeg was
+not there; `music_available()` is also 0 before the first try); `MusicTrack` and `music_source_tracks(source, out, max)`
+(the tracks of a source as it would play, "" for everything; pass 0 for max to count). `tools/dev/musictest.c` has
+`--tracks all|PATH` and the serial on its `NOW` lines; `tests/test_music.py` checks both
+(`test_track_list_and_serial`).
+
+Tests: `tests/test_lobby_menu.py` class `Audio` over made-up engine functions in `tools/dev/lobbymenutest.c` (the
+`music` and `musicstate` commands): the rows and their labels, Your music and the Game music row, FFmpeg missing,
+volume / shuffle / toast saved in `display.ini`, Now playing in each state, the four buttons, the picker (rows, A, B,
+the cursor), the track list (Y, A, a failed pick's toast, a playlist's order, `?` for non-ASCII), the new-track
+message with the menu closed, once per track, off by the row and by `music_toast = 0`.
+
+Not checked in the game yet:
+- how the Audio page looks with 12 rows (they just fit at 1080p; the rows after Now playing may need scrolling at other sizes);
+- the toast over a running game (position bottom centre, not a corner; 4 s; both renderers), including that it is
+  replaced by a "Saved: ..." message and not left stuck;
+- a real library in the picker (paging beyond 40 sources or tracks, a library of thousands of tracks: the track list copies
+  them when it is opened), and a playlist's track list;
+- Previous / Next / Pause while music plays, and that Now playing's clock moves;
+- picking a track from a folder's list while "Playing from" is another source: it plays, and the order goes on in the
+  current source (the source is not changed by a pick);
+- pad (Y) in the picker, and the mouse (a click on a row is A; there is no mouse action for Y).
+
 ## Step 1: the player engine (built; no menu yet)
 
 `runtime/hle_music_player.c` and `runtime/music.h` play the player's own files through the game's own audio output, decoded
@@ -147,10 +206,8 @@ Tests:
   Mono is played at 0.707 on both sides (swresample's mix). Faults put in by hand: 1 ms of silence between tracks and
   one sample dropped at each track's end both make the gapless test fail in all seven formats.
 
-Not done yet: the menu (Audio tab rows for Music on/off, volume, shuffle, next/previous/pause, now playing, the
-"Playing from" picker built on `music_folders`, the now-playing toast, the explicit-pick error message), writing the
-new settings back to `display.ini`, a bigger-than-memory index (the whole library is held in memory), checking the
-Linux and macOS builds (the file is in their lists and include paths but nothing was compiled there).
+Not done yet: a bigger-than-memory index (the whole library is held in memory), checking the Linux and macOS builds
+(the file is in their lists and include paths but nothing was compiled there). The menu is below.
 
 Build notes: the player is `runtime/hle_music_player.c` so that the runtime's existing source patterns
 (`hle\w*`) pick it up on every platform. Adding a name to the pattern in `tools/recomp.py` would change that file,

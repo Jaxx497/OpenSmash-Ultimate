@@ -33,6 +33,7 @@
 #include "gpu_renderer.h"
 #include "language.h"
 #include "mod_switch.h"
+#include "music.h"
 #include "net.h"
 #include "pad.h"
 #include "padusb.h"
@@ -133,9 +134,12 @@ enum
     P_REMAP,
     P_KEYS,
     P_STICKS,
+    P_MUSIC_FROM,   /* Audio > Playing from: the sources to pick */
+    P_MUSIC_TRACKS, /* ... and the tracks of one of them */
     PAGES = P_REMAP
 }; /* (the pad's buttons, the keyboard's keys, the pad's sticks: no key of their own) */
-#define SUB_PAGE(p) ((p) == P_REMAP || (p) == P_KEYS || (p) == P_STICKS) /* (a page of the Controllers page's) */
+#define SUB_PARENT(p) ((p) == P_MUSIC_FROM || (p) == P_MUSIC_TRACKS ? P_AUDIO : P_PADS) /* (the tab a sub-page belongs to) */
+#define SUB_PAGE(p) ((p) == P_REMAP || (p) == P_KEYS || (p) == P_STICKS || (p) == P_MUSIC_FROM || (p) == P_MUSIC_TRACKS) /* (a page of the Controllers page's) */
 static const char *const PAGE_NAMES[PAGES] = {"Display", "Audio", "Controllers", "Online", "Game", "Lobby", "Mods"};
 enum { K_INFO, K_CHOICE, K_ACTION, K_TEXT };
 enum { W_NONE, W_NOW, W_RESTART };
@@ -150,9 +154,13 @@ enum {
     R_KEYS, R_KEYS_BACK, R_KEYS_RESET, R_RENDERER, R_ROOMS_PREV, R_ROOMS_NEXT, R_ROOMS_GAME_PAGE, R_RUNAHEAD, R_NET_ROLLBACK, R_NET_DELAY,
     R_ROOM_FIRST = 60,    /* + the room's place on the page of rooms shown (ROOM_PAGE at most) */
     R_REMAP_FIRST = 100,  /* + console button */
+    R_FROM_FIRST = 700,   /* + the source's place on the page shown (SRC_PAGE at most) */
+    R_TRK_FIRST = 900,    /* + the track's place on the page shown (SRC_PAGE at most) */
     R_MOD_FIRST = 200,    /* + the mod's place in mods.json (MENU_MODS at most) */
     R_KEY_FIRST = 400,    /* + the keyboard binding (PAD_KEYS) */
-    R_OSK = 500           /* the game's own text box (menu_osk_run) */
+    R_OSK = 500,          /* the game's own text box (menu_osk_run) */
+    R_MUSIC = 510, R_MUSIC_VOLUME, R_MUSIC_FROM, R_MUSIC_SHUFFLE, R_MUSIC_TOAST, R_MUSIC_NOW, R_MUSIC_PREV, R_MUSIC_PAUSE, R_MUSIC_NEXT,
+    R_MUSIC_RESCAN, R_FROM_BACK, R_FROM_LESS, R_FROM_MORE, R_TRK_BACK, R_TRK_LESS, R_TRK_MORE   /* (the Audio page's music rows and sub-pages) */
 };
 #define IS_KEY(id) ((id) >= R_KEY_FIRST && (id) < R_KEY_FIRST + PAD_KEYS)
 #define IS_REMAP(id) ((id) >= R_REMAP_FIRST && (id) < R_REMAP_FIRST + 16)
@@ -185,7 +193,7 @@ static Row *add(int id, int kind, int when, const char *label, const char *help)
 }
 
 /* ---- state ---------------------------------------------------------------------------- */
-static int page, sel[P_STICKS + 1], top[P_STICKS + 1];
+static int page, sel[P_MUSIC_TRACKS + 1], top[P_MUSIC_TRACKS + 1];
 static int pad_slot = -1;           /* the pad the Controllers page sets up */
 static int confirm;                 /* a row asking yes or no */
 static int foot, foot_page;         /* the cursor on Restart game (1) or Quit game (2), under foot_page's rows */
@@ -290,6 +298,7 @@ static void load_version(void)
 }
 
 static void load_pins(void);
+static void trk_free(void);
 
 static void open_menu(void)
 {
@@ -304,7 +313,7 @@ static void open_menu(void)
     confirm = editing = 0;
     capture_button = capture_key = -1;
     if (SUB_PAGE(page))
-        page = P_PADS;
+        page = SUB_PARENT(page);
     open_ = 1;
     fprintf(stderr, "[menu] open\n");
 }
@@ -317,6 +326,7 @@ static void close_menu(void)
         InterlockedExchange(&osk_state, 4); /* (the game's text box closed with the menu: cancelled) */
     confirm = editing = 0;
     capture_button = capture_key = -1;
+    trk_free();
     releasing = 1; /* (the game gets input back once nothing is held) */
     open_ = 0;
     built_page = -1; /* (the Lobby page lists the rooms again when it shows next) */
@@ -857,6 +867,323 @@ static void match_follow(void)
         match_followed = 0;
 }
 
+/* ---- Audio: your own music (music.h, docs/CUSTOM-MUSIC-PLAN.md) ------------------------------------
+ * The rows apply at once and are saved to display.ini like Volume (music.h's setters do not write it).
+ * The overlay's font is printable ASCII only: titles and artists are shown with a '?' for each other
+ * character, and " - " stands where "." would be a dot between title and artist. */
+enum
+{
+    SRC_PAGE = 40,  /* sources or tracks listed at a time (the rest: Earlier / More rows, as the Lobby page's rooms) */
+    SRC_MAX = 200   /* folders and playlists listed in all */
+};
+#define IS_FROM(id) ((id) >= R_FROM_FIRST && (id) < R_FROM_FIRST + SRC_PAGE && from_view + (id) - R_FROM_FIRST < from_n)
+#define IS_TRK(id) ((id) >= R_TRK_FIRST && (id) < R_TRK_FIRST + SRC_PAGE && trk_list && trk_view + (id) - R_TRK_FIRST < trk_n)
+static int want_row;                      /* the row the cursor goes to when its page is next built (R_NONE: stays) */
+static MusicFolder from_ents[SRC_MAX];    /* 0: every track, then the folders, then the playlists (music_folders) */
+static int from_n, from_view, from_at;    /* from_at: the entry whose tracks are open */
+static MusicTrack *trk_list;
+static int trk_n, trk_view;
+static char trk_src[1024], trk_name[96];
+static int music_toast_on = -1;           /* display.ini's music_toast: the new-track message (read once) */
+
+static int track_toast_wanted(void)
+{
+    if (music_toast_on < 0)
+    {
+        char b[16] = "";
+        music_toast_on = !(settings_ini_get(display_ini_path(), NULL, "music_toast", b, sizeof b) && b[0] == '0');
+    }
+    return music_toast_on;
+}
+
+/* s as plain ASCII for the overlay's font, at most `max` characters (the end "..." when cut). */
+static void ascii_fit(char *out, size_t size, const char *s, int max)
+{
+    size_t o = 0;
+    int n = 0, cut = 0;
+    for (; *s && o + 1 < size; s++)
+    {
+        unsigned char c = (unsigned char)*s;
+        if ((c & 0xC0) == 0x80)
+            continue; /* (the rest of a character already shown as '?') */
+        if (n >= max)
+        {
+            cut = 1;
+            break;
+        }
+        out[o++] = c >= 127 ? '?' : c < 32 ? ' ' : (char)c;
+        n++;
+    }
+    out[o] = 0;
+    if (cut && o >= 3)
+        memcpy(out + o - 3, "...", 3);
+}
+
+static void clock_text(char *out, size_t size, double sec)
+{
+    int t = sec > 0 ? (int)sec : 0;
+    if (t >= 3600)
+        snprintf(out, size, "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+    else
+        snprintf(out, size, "%d:%02d", t / 60, t % 60);
+}
+
+/* "Title - Artist" (the artist left out when the file has none). */
+static void track_text(char *out, size_t size, const char *title, const char *artist)
+{
+    char t[100], a[80];
+    ascii_fit(t, sizeof t, title, 60);
+    ascii_fit(a, sizeof a, artist, 40);
+    if (a[0])
+        snprintf(out, size, "%s - %s", t, a);
+    else
+        snprintf(out, size, "%s", t);
+}
+
+static void from_load(void)
+{
+    int n = music_folders(from_ents + 1, SRC_MAX - 1);
+    from_n = 1 + (n < SRC_MAX - 1 ? n : SRC_MAX - 1);
+    memset(&from_ents[0], 0, sizeof from_ents[0]);
+    snprintf(from_ents[0].name, sizeof from_ents[0].name, "Everything");
+    from_ents[0].tracks = music_track_count();
+}
+
+/* The entry the music plays from now (0: everything, or a source the list no longer has). */
+static int from_current(void)
+{
+    char cur[1024];
+    music_get_source(cur, sizeof cur);
+    for (int i = 1; cur[0] && i < from_n; i++)
+        if (!_stricmp(cur, from_ents[i].path))
+            return i;
+    return 0;
+}
+
+static void trk_free(void)
+{
+    free(trk_list);
+    trk_list = NULL;
+    trk_n = 0;
+}
+
+static void open_picker(void)
+{
+    from_load();
+    from_at = from_current();
+    from_view = from_at / SRC_PAGE * SRC_PAGE;
+    page = P_MUSIC_FROM;
+    sel[P_MUSIC_FROM] = 0;
+    top[P_MUSIC_FROM] = 0;
+    want_row = R_FROM_FIRST + from_at - from_view;
+}
+
+/* Y on a source: its tracks (k: its place on the page shown). */
+static void open_tracks(int k)
+{
+    int at = from_view + k;
+    if (at < 0 || at >= from_n)
+        return;
+    from_at = at;
+    snprintf(trk_src, sizeof trk_src, "%s", from_ents[at].path);
+    ascii_fit(trk_name, sizeof trk_name, from_ents[at].name, 60);
+    trk_free();
+    int n = music_source_tracks(trk_src, NULL, 0);
+    trk_list = malloc((size_t)(n > 0 ? n : 1) * sizeof *trk_list);
+    if (!trk_list)
+        return;
+    trk_n = music_source_tracks(trk_src, trk_list, n);
+    if (trk_n > n)
+        trk_n = n;
+    trk_view = 0;
+    page = P_MUSIC_TRACKS;
+    sel[P_MUSIC_TRACKS] = trk_n ? 1 : 0;
+    top[P_MUSIC_TRACKS] = 0;
+}
+
+/* The source's name as the Audio page shows it. */
+static void source_name(char *out, size_t size)
+{
+    char cur[1024];
+    music_get_source(cur, sizeof cur);
+    if (!cur[0])
+    {
+        snprintf(out, size, "Everything");
+        return;
+    }
+    from_load();
+    int i = from_current();
+    if (i > 0)
+        ascii_fit(out, size, from_ents[i].name, 60);
+    else
+    { /* (a source the library does not list, from SSBU_MUSIC_SOURCE or by hand: its last part) */
+        const char *base = cur, *c;
+        for (c = cur; *c; c++)
+            if (*c == '\\' || *c == '/')
+                base = c + 1;
+        ascii_fit(out, size, base, 60);
+    }
+}
+
+static void music_rows(void)
+{
+    Row *r;
+    MusicNow now;
+    int on = music_enabled(), missing = music_ffmpeg_missing();
+    music_now(&now);
+    r = add(R_MUSIC, K_CHOICE, W_NOW, "Your music",
+            "Plays your own music files: the music folder of the game, and the folders in config\\music.ini. On turns the game's music off, off turns it back on.");
+    snprintf(r->value, sizeof r->value, "%s", on_off(on));
+    note_env(r, "SSBU_MUSIC");
+    if (missing && !on)
+        snprintf(r->note, sizeof r->note, "FFmpeg not found");
+    r = add(R_MUSIC_VOLUME, K_CHOICE, W_NOW, "Music volume", "How loud your music is, under Volume above. Left and right change it by 5%.");
+    snprintf(r->value, sizeof r->value, "%d%%", music_volume());
+    note_env(r, "SSBU_MUSIC_VOLUME");
+    r = add(R_MUSIC_FROM, K_ACTION, W_NONE, "Playing from", "Everything, one folder or one playlist. A: pick one.");
+    source_name(r->value, sizeof r->value);
+    note_env(r, "SSBU_MUSIC_SOURCE");
+    r = add(R_MUSIC_SHUFFLE, K_CHOICE, W_NOW, "Shuffle", "On: a random order, every track once before any comes again. Off: the order of the folder or playlist.");
+    snprintf(r->value, sizeof r->value, "%s", on_off(music_shuffle()));
+    note_env(r, "SSBU_MUSIC_SHUFFLE");
+    r = add(R_MUSIC_TOAST, K_CHOICE, W_NOW, "Track toast", "Shows each new track's title for a few seconds, over the game too.");
+    snprintf(r->value, sizeof r->value, "%s", on_off(track_toast_wanted()));
+    /* what plays: a row that does nothing on A, so the cursor can rest on it and read the whole of it in the help */
+    r = add(R_MUSIC_NOW, K_ACTION, W_NONE, "Now playing", NULL);
+    char text[400];
+    if (missing)
+        snprintf(text, sizeof text, "FFmpeg not found: custom music is off");
+    else if (on && now.state == 0 && !music_track_count() && !music_scanning())
+        snprintf(text, sizeof text, "No music found: put files in music\\ or list folders in config\\music.ini");
+    else if (!on || now.state == 0)
+        snprintf(text, sizeof text, "Nothing");
+    else
+    {
+        char name[220], at[24], len[24];
+        track_text(name, sizeof name, now.title, now.artist);
+        clock_text(at, sizeof at, now.position);
+        if (now.duration > 0)
+        {
+            clock_text(len, sizeof len, now.duration);
+            snprintf(text, sizeof text, "%s  %s / %s%s", name, at, len, now.state == 2 ? " (paused)" : "");
+        }
+        else
+            snprintf(text, sizeof text, "%s  %s%s", name, at, now.state == 2 ? " (paused)" : "");
+    }
+    snprintf(r->value, sizeof r->value, "%s", text);
+    help_set(r, "%s", text);
+    const char *why = missing ? "FFmpeg not found" : "turn on Your music";
+    r = add(R_MUSIC_PREV, K_ACTION, W_NONE, "Previous", "The track played before this one; this one again when there is none.");
+    if (!on)
+        snprintf(r->note, sizeof r->note, "%s", why);
+    r = add(R_MUSIC_PAUSE, K_ACTION, W_NONE, now.state == 2 ? "Resume" : "Pause", "Pauses your music, or goes on where it stopped.");
+    if (!on)
+        snprintf(r->note, sizeof r->note, "%s", why);
+    r = add(R_MUSIC_NEXT, K_ACTION, W_NONE, "Next", "Skips to the next track.");
+    if (!on)
+        snprintf(r->note, sizeof r->note, "%s", why);
+    r = add(R_MUSIC_RESCAN, K_ACTION, W_NONE, "Rescan library", "Reads the music folders again for new, changed and removed files. The music goes on playing.");
+    if (!on)
+        snprintf(r->note, sizeof r->note, "%s", why);
+    if (music_scanning())
+        snprintf(r->value, sizeof r->value, "scanning...");
+}
+
+/* Playing from: Everything, the folders, the playlists. */
+static void from_rows(void)
+{
+    from_load();
+    if (from_view >= from_n)
+        from_view = 0;
+    int cur = from_current();
+    add(R_FROM_BACK, K_ACTION, W_NONE, "< Back", "Back to the Audio settings.");
+    Row *r;
+    if (from_view > 0)
+    {
+        r = add(R_FROM_LESS, K_ACTION, W_NONE, "Earlier sources", "A: the folders and playlists before these.");
+        snprintf(r->value, sizeof r->value, "%d-%d", from_view - SRC_PAGE + 1 > 1 ? from_view - SRC_PAGE + 1 : 1, from_view);
+    }
+    int end = from_view + SRC_PAGE < from_n ? from_view + SRC_PAGE : from_n;
+    for (int i = from_view; i < end; i++)
+    {
+        const MusicFolder *f = &from_ents[i];
+        r = add(R_FROM_FIRST + i - from_view, K_ACTION, W_NONE, "",
+                "A: play from this, back to the Audio settings. Y or Delete: see its tracks.");
+        char name[64];
+        ascii_fit(name, sizeof name, f->name, 34);
+        if (!i)
+            snprintf(r->label, sizeof r->label, "Everything (%d tracks)", f->tracks);
+        else
+            snprintf(r->label, sizeof r->label, "%s  (%d)", name, f->tracks);
+        snprintf(r->value, sizeof r->value, "%s", !i ? "" : f->playlist ? "playlist" : "folder");
+        if (i == cur)
+            snprintf(r->note, sizeof r->note, "playing from here");
+    }
+    if (end < from_n)
+    {
+        r = add(R_FROM_MORE, K_ACTION, W_NONE, "More sources", "A: the folders and playlists after these.");
+        snprintf(r->value, sizeof r->value, "%d-%d", end + 1, from_n);
+    }
+}
+
+/* The tracks of one source. */
+static void track_rows(void)
+{
+    Row *r = add(R_TRK_BACK, K_ACTION, W_NONE, "< Back", "Back to the folders and playlists.");
+    snprintf(r->value, sizeof r->value, "%s", trk_name);
+    if (!trk_list || !trk_n)
+    {
+        add(R_NONE, K_INFO, W_NONE, "No tracks here", NULL);
+        return;
+    }
+    if (trk_view >= trk_n)
+        trk_view = 0;
+    if (trk_view > 0)
+    {
+        r = add(R_TRK_LESS, K_ACTION, W_NONE, "Earlier tracks", "A: the tracks before these.");
+        snprintf(r->value, sizeof r->value, "%d-%d", trk_view - SRC_PAGE + 1 > 1 ? trk_view - SRC_PAGE + 1 : 1, trk_view);
+    }
+    int end = trk_view + SRC_PAGE < trk_n ? trk_view + SRC_PAGE : trk_n;
+    for (int i = trk_view; i < end; i++)
+    {
+        const MusicTrack *t = &trk_list[i];
+        r = add(R_TRK_FIRST + i - trk_view, K_ACTION, W_NONE, "", "A: play this track now.");
+        ascii_fit(r->label, sizeof r->label, t->title, 40);
+        char artist[64], len[24] = "";
+        ascii_fit(artist, sizeof artist, t->artist, 40);
+        if (t->duration > 0)
+            clock_text(len, sizeof len, t->duration);
+        snprintf(r->value, sizeof r->value, "%s%s%s", artist, artist[0] && len[0] ? "  " : "", len);
+    }
+    if (end < trk_n)
+    {
+        r = add(R_TRK_MORE, K_ACTION, W_NONE, "More tracks", "A: the tracks after these.");
+        snprintf(r->value, sizeof r->value, "%d-%d", end + 1, trk_n);
+    }
+}
+
+/* Called every frame, the menu open or not: a new track heard shows its name over the game. */
+static void music_follow(void)
+{
+    static ULONGLONG next;
+    static unsigned seen;
+    ULONGLONG now = GetTickCount64();
+    if (now < next || !music_enabled())
+        return;
+    next = now + 100;
+    MusicNow n;
+    music_now(&n);
+    if (!n.serial || n.serial == seen)
+        return;
+    seen = n.serial;
+    if (!track_toast_wanted())
+        return;
+    char t[160], name[200];
+    track_text(name, sizeof name, n.title, n.artist);
+    snprintf(t, sizeof t, "Now playing: %s", name);
+    menu_toast(t);
+}
+
 static void build(void)
 {
     /* (the Lobby page: the row under the cursor, by what it is, so the cursor stays on it when the
@@ -956,6 +1283,13 @@ static void build(void)
                 "The game's own music. Off silences it and keeps sound effects and voices; for playing your own music.");
         snprintf(r->value, sizeof r->value, "%s", on_off(audio_game_music()));
         note_env(r, "SSBU_GAME_MUSIC");
+        music_rows();
+        break;
+    case P_MUSIC_FROM:
+        from_rows();
+        break;
+    case P_MUSIC_TRACKS:
+        track_rows();
         break;
     case P_PADS:
         if (!npads_connected)
@@ -1221,6 +1555,16 @@ static void build(void)
         snprintf(r->value, sizeof r->value, "%s", version[0] ? version : "unknown (no version.txt)");
         break;
     }
+    if (want_row != R_NONE)
+    { /* (the cursor goes to a row it was asked to: coming back to a page) */
+        for (int i = 0; i < nrows; i++)
+            if (rows[i].id == want_row)
+            {
+                sel[page] = i;
+                break;
+            }
+        want_row = R_NONE;
+    }
 }
 
 static int selectable(const Row *r) { return r->kind != K_INFO; }
@@ -1341,6 +1685,29 @@ static void change(const Row *row, int dir)
         set_display("volume", v);
         break;
     }
+    case R_MUSIC:
+    { /* (the engine turns the game's music off with it and back on: both are saved) */
+        int on = music_set_enabled(!music_enabled());
+        set_display("music", on ? "1" : "0");
+        set_display("game_music", audio_game_music() ? "1" : "0");
+        break;
+    }
+    case R_MUSIC_VOLUME:
+    { /* 0 to 100 in steps of 5 */
+        int mv = cycle((music_volume() + 2) / 5, 21, dir) * 5;
+        music_set_volume(mv);
+        snprintf(v, sizeof v, "%d", mv);
+        set_display("music_volume", v);
+        break;
+    }
+    case R_MUSIC_SHUFFLE:
+        music_set_shuffle(!music_shuffle());
+        set_display("music_shuffle", music_shuffle() ? "1" : "0");
+        break;
+    case R_MUSIC_TOAST:
+        music_toast_on = !track_toast_wanted();
+        set_display("music_toast", music_toast_on ? "1" : "0");
+        break;
     case R_GAME_MUSIC:
         audio_set_game_music(!audio_game_music());
         set_display("game_music", audio_game_music() ? "1" : "0");
@@ -1567,6 +1934,31 @@ static void action(const Row *row)
         capture_until = GetTickCount64() + 6000;
         return;
     }
+    if (IS_FROM(row->id))
+    { /* a source to play from */
+        const MusicFolder *f = &from_ents[from_view + row->id - R_FROM_FIRST];
+        music_set_source(f->path);
+        set_display("music_source", f->path[0] ? f->path : NULL);
+        page = P_AUDIO;
+        want_row = R_MUSIC_FROM;
+        return;
+    }
+    if (IS_TRK(row->id))
+    { /* a track, played now: the one error the music shows */
+        char why[300], t[160];
+        if (music_play_track(trk_list[trk_view + row->id - R_TRK_FIRST].path, why, sizeof why))
+        {
+            trk_free();
+            page = P_AUDIO;
+            want_row = R_MUSIC_NOW;
+        }
+        else
+        {
+            ascii_fit(t, sizeof t, why, 150);
+            menu_toast(t);
+        }
+        return;
+    }
     if (IS_ROOM(row->id))
     { /* a room: put it first in the game's own Rooms List, where it is joined */
         const NetRoom *x = ROOM_AT(row->id);
@@ -1589,6 +1981,47 @@ static void action(const Row *row)
     }
     switch (row->id)
     {
+    case R_MUSIC_FROM:
+        open_picker();
+        break;
+    case R_MUSIC_NOW:
+        break;
+    case R_MUSIC_PREV:
+        music_previous();
+        break;
+    case R_MUSIC_PAUSE:
+        if (music_enabled())
+            music_pause(!music_paused());
+        break;
+    case R_MUSIC_NEXT:
+        music_next();
+        break;
+    case R_MUSIC_RESCAN:
+        music_rescan();
+        break;
+    case R_FROM_BACK:
+        page = P_AUDIO;
+        want_row = R_MUSIC_FROM;
+        break;
+    case R_FROM_LESS:
+        from_view = from_view > SRC_PAGE ? from_view - SRC_PAGE : 0;
+        break;
+    case R_FROM_MORE:
+        if (from_view + SRC_PAGE < from_n)
+            from_view += SRC_PAGE;
+        break;
+    case R_TRK_BACK:
+        page = P_MUSIC_FROM;
+        want_row = R_FROM_FIRST + from_at - from_view;
+        trk_free();
+        break;
+    case R_TRK_LESS:
+        trk_view = trk_view > SRC_PAGE ? trk_view - SRC_PAGE : 0;
+        break;
+    case R_TRK_MORE:
+        if (trk_view + SRC_PAGE < trk_n)
+            trk_view += SRC_PAGE;
+        break;
     case R_MATCH_FIND:
         if (match.state == NET_MATCH_ASKING || match.state == NET_MATCH_SEARCHING)
             menu_toast("Searching already");
@@ -2113,6 +2546,8 @@ static void event(int ev, unsigned ch)
             action(row);
         break;
     case EV_DEL:
+        if (page == P_MUSIC_FROM && row && IS_FROM(row->id))
+            open_tracks(row->id - R_FROM_FIRST);
         if (page == P_REMAP && row && IS_REMAP(row->id) && pad_slot >= 0 && pads[pad_slot].connected)
         {
             char section[128];
@@ -2128,8 +2563,17 @@ static void event(int ev, unsigned ch)
         break;
     case EV_B:
     case EV_BKSP:
-        if (SUB_PAGE(page))
-            page = P_PADS;
+        if (page == P_MUSIC_TRACKS)
+        { /* (the list of sources it came from) */
+            page = P_MUSIC_FROM;
+            want_row = R_FROM_FIRST + from_at - from_view;
+            trk_free();
+        }
+        else if (SUB_PAGE(page))
+        {
+            page = SUB_PARENT(page);
+            want_row = page == P_AUDIO ? R_MUSIC_FROM : R_NONE;
+        }
         else
             close_menu();
         break;
@@ -2138,7 +2582,7 @@ static void event(int ev, unsigned ch)
         break;
     case EV_NEXT:
     case EV_PREV:
-        page = SUB_PAGE(page) ? P_PADS : cycle(page, PAGES, ev == EV_NEXT ? 1 : -1);
+        page = SUB_PAGE(page) ? SUB_PARENT(page) : cycle(page, PAGES, ev == EV_NEXT ? 1 : -1);
         break;
     case EV_CHAR:
         if (ch >= '1' && ch < '1' + PAGES)
@@ -2502,6 +2946,7 @@ int menu_frame(int *overlay, int f3)
         InterlockedExchange(&osk_state, 0);
     }
     match_follow();
+    music_follow();
     if (open_)
     {
         build();
@@ -2651,7 +3096,7 @@ void menu_draw(float w, float h)
     button_icon(rx_icon, tab_y + 4 * s, icon, tab_h - 8 * s, s, HIT_NEXT, "R");
     for (int i = 0; i < PAGES; i++)
     {
-        int on = page == i || (SUB_PAGE(page) && i == P_PADS);
+        int on = page == i || (SUB_PAGE(page) && i == SUB_PARENT(page));
         float x = tabs_x + (float)i * tab_w;
         const Hit *t = hit_add(x, tab_y, tab_w, tab_h, HIT_PAGE, i, 0);
         if (on)
@@ -2738,6 +3183,8 @@ void menu_draw(float w, float h)
              page == P_REMAP    ? "Up/Down: choose   A/Enter: press a new control   Y/Delete: default   B/Backspace: back   Esc: close"
              : page == P_KEYS   ? "Up/Down: choose   A/Enter: press a new key   Y/Delete: default   B/Backspace: back   Esc: close"
              : page == P_STICKS ? "The numbers update live   B/Backspace: back   Esc: close"
+             : page == P_MUSIC_FROM ? "Up/Down: choose   A/Enter: play from it   Y/Delete: its tracks   B/Backspace: back   Esc: close"
+             : page == P_MUSIC_TRACKS ? "Up/Down: choose   A/Enter: play this track   B/Backspace: back   Esc: close"
                                 : "Up/Down: choose   Left/Right: change   A/Enter: select   L/R, Q/E or Tab: page   B/Esc: close");
     /* on top: a question, the text being typed, or a control being waited for */
     if (confirm)

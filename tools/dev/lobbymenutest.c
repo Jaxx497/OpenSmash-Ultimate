@@ -31,6 +31,9 @@
  *                  frames until the keyboard is open: "ok"
  *   oskstate       a frame, then "oskstate EDITING ROW COL|TEXT" (EDITING: 1 the game's text box is open)
  *   oskresult SECS wait for the game's answer: "oskresult OK|TEXT" (OK 1 typed, 0 cancelled; "oskresult pending")
+ *   music KEY VALUE  the made-up music engine (hle_music_player.c's functions): missing 0|1, scanning 0|1, tracks N,
+ *                  enabled 0|1, now STATE|TITLE|ARTIST|POSITION|DURATION|SERIAL: "ok"
+ *   musicstate     "musicstate ENABLED VOLUME SHUFFLE PAUSED GAMEMUSIC NEXT PREV RESCAN|SOURCE|LAST PLAYED TRACK"
  *   quit           ends (net_relay.c's exit handler sends LEAVE)
  * Anything else: "error". */
 #ifdef __APPLE__   /* (macos/platform.c has a menu_blocks_input of its own: the Mac program has no menu yet) */
@@ -105,8 +108,73 @@ int display_renderer(void) { return RENDERER_DEFAULT; }   /* (the setting this s
 int gfx_renderer(void) { return RENDERER_D3D11; }
 int audio_master_volume(void) { return 100; }                 /* (ipc_audio.c: the master volume) */
 void audio_set_master_volume(int percent) { (void)percent; }
-int audio_game_music(void) { return 1; }                      /* (hle_music.c: the game's music switch) */
-void audio_set_game_music(int on) { (void)on; }
+static int game_music_on = 1;
+int audio_game_music(void) { return game_music_on; }          /* (hle_music.c: the game's music switch) */
+void audio_set_game_music(int on) { game_music_on = on != 0; }
+/* (hle_music_player.c's, made up: three folders and playlists of a made-up library, set by "music" commands) */
+static struct {
+    int enabled, volume, shuffle, paused, missing, scanning, ntracks, next, prev, rescan;
+    char source[1024], played[600];
+    MusicNow now;
+} fake_music = {.volume = 70, .shuffle = 1, .ntracks = 4};
+int music_available(void) { return !fake_music.missing; }
+int music_ffmpeg_missing(void) { return fake_music.missing; }
+int music_enabled(void) { return fake_music.enabled; }
+int music_set_enabled(int on) {
+    if (on && fake_music.missing) return 0;
+    fake_music.enabled = on != 0;
+    audio_set_game_music(!on);   /* (as the engine does) */
+    return fake_music.enabled;
+}
+int music_volume(void) { return fake_music.volume; }
+void music_set_volume(int p) { fake_music.volume = p; }
+int music_shuffle(void) { return fake_music.shuffle; }
+void music_set_shuffle(int on) { fake_music.shuffle = on != 0; }
+void music_get_source(char *out, int size) { snprintf(out, (size_t)size, "%s", fake_music.source); }
+void music_set_source(const char *f) { snprintf(fake_music.source, sizeof fake_music.source, "%s", f ? f : ""); }
+void music_next(void) { fake_music.next++; }
+void music_previous(void) { fake_music.prev++; }
+void music_pause(int p) { fake_music.paused = p != 0; }
+int music_paused(void) { return fake_music.paused; }
+void music_rescan(void) { fake_music.rescan++; }
+int music_scanning(void) { return fake_music.scanning; }
+int music_track_count(void) { return fake_music.ntracks; }
+int music_folders(MusicFolder *out, int max) {
+    static const struct { const char *path, *name; int tracks, playlist; } F[] = {
+        {"C:/Music/Jazz", "Jazz", 2, 0}, {"C:/Music/Rock", "Rock", 2, 0}, {"C:/Music/mix.m3u8", "mix", 2, 1}};
+    for (int i = 0; i < 3 && i < max; i++) {
+        snprintf(out[i].path, sizeof out[i].path, "%s", F[i].path);
+        snprintf(out[i].name, sizeof out[i].name, "%s", F[i].name);
+        out[i].tracks = F[i].tracks;
+        out[i].playlist = F[i].playlist;
+    }
+    return 3;
+}
+int music_source_tracks(const char *src, MusicTrack *out, int max) {
+    static const struct { const char *path, *title, *artist; double len; } T[] = {
+        {"C:/Music/Jazz/1.mp3", "Jazz One", "Miles", 125}, {"C:/Music/Jazz/bad.mp3", "Broken Song", "", 0},
+        {"C:/Music/Rock/1.mp3", "Rock One", "Band \xE3\x81\x82", 3725}, {"C:/Music/Rock/2.mp3", "Rock Two", "Band", 61}};
+    static const int MIX[] = {3, 0};
+    int n = 0;
+    for (int k = 0; k < 4; k++) {
+        int i = !strcmp(src, "C:/Music/mix.m3u8") ? (k < 2 ? MIX[k] : -1) : k;
+        if (i < 0 || (strstr(src, "/Jazz") && !strstr(T[i].path, "/Jazz/")) || (strstr(src, "/Rock") && !strstr(T[i].path, "/Rock/"))) continue;
+        if (n < max) {
+            snprintf(out[n].path, sizeof out[n].path, "%s", T[i].path);
+            snprintf(out[n].title, sizeof out[n].title, "%s", T[i].title);
+            snprintf(out[n].artist, sizeof out[n].artist, "%s", T[i].artist);
+            out[n].duration = T[i].len;
+        }
+        n++;
+    }
+    return n;
+}
+void music_now(MusicNow *now) { *now = fake_music.now; }
+int music_play_track(const char *path, char *why, int size) {
+    if (strstr(path, "bad")) { snprintf(why, (size_t)size, "Couldn't play \"Broken Song\": the file doesn't open"); return 0; }
+    snprintf(fake_music.played, sizeof fake_music.played, "%s", path);
+    return 1;
+}
 /* (hle_mod_switch.c: no mods here) */
 int mods_switch_list(ModSwitch *out, int max, int *code) { (void)out; (void)max; *code = -1; return 0; }
 int mods_switch_set(const char *name, int on) { (void)name; (void)on; return 0; }
@@ -297,6 +365,29 @@ int main(int argc, char **argv) {
         else if (!strcmp(what, "rows")) cmd_rows();
         else if (!strcmp(what, "draw")) cmd_draw();
         else if (!strcmp(what, "toast")) cmd_toast();
+        else if (!strcmp(what, "music")) {
+            char key[16] = "", val[500] = "";
+            if (sscanf(line, "music %15s %499[^\n]", key, val) < 2) { say("error"); continue; }
+            if (!strcmp(key, "missing")) fake_music.missing = atoi(val);
+            else if (!strcmp(key, "scanning")) fake_music.scanning = atoi(val);
+            else if (!strcmp(key, "tracks")) fake_music.ntracks = atoi(val);
+            else if (!strcmp(key, "enabled")) fake_music.enabled = atoi(val);
+            else if (!strcmp(key, "now")) {
+                char *f[6] = {val, NULL, NULL, NULL, NULL, NULL};
+                for (int k = 1; k < 6; k++) { char *bar = f[k - 1] ? strchr(f[k - 1], '|') : NULL; if (bar) { *bar = 0; f[k] = bar + 1; } }
+                memset(&fake_music.now, 0, sizeof fake_music.now);
+                fake_music.now.state = atoi(f[0]);
+                snprintf(fake_music.now.title, sizeof fake_music.now.title, "%s", f[1] ? f[1] : "");
+                snprintf(fake_music.now.artist, sizeof fake_music.now.artist, "%s", f[2] ? f[2] : "");
+                fake_music.now.position = f[3] ? atof(f[3]) : 0;
+                fake_music.now.duration = f[4] ? atof(f[4]) : 0;
+                fake_music.now.serial = f[5] ? (unsigned)atoi(f[5]) : 0;
+            } else { say("error"); continue; }
+            say("ok");
+        }
+        else if (!strcmp(what, "musicstate"))
+            say("musicstate %d %d %d %d %d %d %d %d|%s|%s", fake_music.enabled, fake_music.volume, fake_music.shuffle, fake_music.paused,
+                game_music_on, fake_music.next, fake_music.prev, fake_music.rescan, fake_music.source, fake_music.played);
         else if (!strcmp(what, "mouse")) {
             int x = 0, y = 0, w = 1920, h = 1080;
             if (sscanf(line, "mouse %d %d %d %d", &x, &y, &w, &h) < 2) { say("error"); continue; }

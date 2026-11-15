@@ -3,7 +3,7 @@
  * thread would play to a 48 kHz stereo 16-bit WAV. tests/test_music.py builds and drives it.
  *
  *   musictest --game DIR --out FILE.wav --seconds S [--skip T] [--prev T] [--pause T] [--resume T]
- *             [--pick T PATH] [--source T PATH] [--now T] [--rescan] [--volume N] [--shuffle 0|1] [--slow MS] [--realtime]
+ *             [--pick T PATH] [--tracks all|PATH] [--source T PATH] [--now T] [--rescan] [--volume N] [--shuffle 0|1] [--slow MS] [--realtime]
  *
  * T is a position in the output, in seconds. The play order is the library's (shuffle off by default). Unless
  * --realtime, the player is waited for (so the file is the same on a slow machine); --realtime paces the pulls
@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
     const char *game = ".", *outpath = "out.wav";
     double seconds = 5;
     int realtime = 0, rescan = 0;
-    char volume[16] = "100", shuffle[4] = "0";
+    char volume[16] = "100", shuffle[4] = "0", list_src[1100] = "";
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--game") && i + 1 < argc) game = argv[++i];
@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--slow") && i + 1 < argc) slow_ms = atoi(argv[++i]);
         else if (!strcmp(a, "--realtime")) realtime = 1;
         else if (!strcmp(a, "--rescan")) rescan = 1;
+        else if (!strcmp(a, "--tracks") && i + 1 < argc) snprintf(list_src, sizeof list_src, "%s", argv[++i]);
         else if (nev < 64 && (!strcmp(a, "--skip") || !strcmp(a, "--prev") || !strcmp(a, "--pause") || !strcmp(a, "--resume") ||
                               !strcmp(a, "--now") || !strcmp(a, "--pick") || !strcmp(a, "--source")) && i + 1 < argc) {
             ev[nev].what = a[2];   /* s(kip) p(rev|ause|ick) r(esume) n(ow) s(ource): told apart below */
@@ -83,6 +84,12 @@ int main(int argc, char **argv) {
     int nf = music_folders(fl, 64);
     for (int i = 0; i < nf && i < 64; i++) printf("FOLDER %s %d %s\n", fl[i].playlist ? "playlist" : "folder", fl[i].tracks, fl[i].path);
     printf("TRACKS %d\n", music_track_count());
+    if (list_src[0]) {   /* --tracks all | PATH: the picker's track list */
+        static MusicTrack tl[64];
+        int nt = music_source_tracks(strcmp(list_src, "all") ? list_src : "", tl, 64);
+        printf("TRACKLIST %d\n", nt);
+        for (int i = 0; i < nt && i < 64; i++) printf("TRACK %s|%s|%.2f|%s\n", tl[i].title, tl[i].artist, tl[i].duration, tl[i].path);
+    }
 
     uint64_t total = (uint64_t)(seconds * RATE), done = 0;
     double t0 = (double)GetTickCount64() / 1000.0;
@@ -107,7 +114,7 @@ int main(int argc, char **argv) {
             } else {
                 MusicNow n;
                 music_now(&n);
-                printf("NOW %d|%s|%s|%.2f|%.2f\n", n.state, n.title, n.artist, n.position, n.duration);
+                printf("NOW %d|%s|%s|%.2f|%.2f|%u\n", n.state, n.title, n.artist, n.position, n.duration, n.serial);
             }
         }
         (void)next_ev;

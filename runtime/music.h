@@ -13,6 +13,8 @@
 void music_player_start(void);   /* (host.c's main) reads the settings; with music on, loads FFmpeg and starts */
 int music_available(void);       /* FFmpeg is there (known after the first try: music on, or music_set_enabled) */
 
+int music_ffmpeg_missing(void);  /* music was tried (turned on) and FFmpeg's DLLs were not there */
+
 int music_enabled(void);
 /* On: loads FFmpeg (once), starts the scan and the player, and turns the game's own music off
  * (audio_set_game_music(0)). Off: fades out, turns the game's music back on. Returns whether it is on
@@ -39,10 +41,17 @@ typedef struct { char path[520], name[256]; int tracks, playlist; } MusicFolder;
  * most max; returns how many there are. */
 int music_folders(MusicFolder *out, int max);
 
+typedef struct { char path[520], title[256], artist[256]; double duration; } MusicTrack;
+/* The tracks of a source as it would play (a playlist in its order, a folder with its subfolders, "" every
+ * track in a library folder), in the library's order. Fills at most max; returns how many there are.
+ * A track's path goes to music_play_track. */
+int music_source_tracks(const char *source, MusicTrack *out, int max);
+
 typedef struct {
     int state;               /* 0 nothing playing, 1 playing, 2 paused */
     char title[256], artist[256];   /* tags, else the file's name; artist may be empty */
     double position, duration;      /* seconds; duration 0 when the file does not say */
+    unsigned serial;         /* 0 nothing; another number each time a track starts being heard (not decoded): the menu's toast */
 } MusicNow;
 void music_now(MusicNow *now);
 

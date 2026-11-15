@@ -749,8 +749,9 @@ enum { C_START, C_STOP, C_NEXT, C_PREV, C_PICK };
 static struct Track *pick;   /* (L) a track the user chose, opened by the caller, for the player to take over */
 static uint8_t cmdq[16];   /* (L) */
 static int ncmd;
-static struct { uint64_t start; char title[256], artist[256]; double duration; int h, pos; } ent[NENT];   /* (L) tracks in the ring */
+static struct { uint64_t start; char title[256], artist[256]; double duration; int h, pos; uint32_t seq; } ent[NENT];   /* (L) tracks in the ring */
 static int nent;
+static uint32_t ent_seq;   /* (L) numbers the tracks announced: music_now's serial */
 /* The tracks that have been played, as they began (L): the player decodes ahead, so skip and previous go by
  * what is heard (the entry of the ring's read position: its h in hist, its pos in the order), not by what the
  * player has reached. Library indexes; emptied when the library changes. */
@@ -996,6 +997,7 @@ static void announce(Track *t) {   /* the first sound of a track: remember where
     ent[nent].h = nhist++;
     ent[nent].pos = t->pos;
     ent[nent].start = M.wpos;
+    ent[nent].seq = ++ent_seq;
     snprintf(ent[nent].title, sizeof ent[nent].title, "%s", t->title);
     snprintf(ent[nent].artist, sizeof ent[nent].artist, "%s", t->artist);
     ent[nent++].duration = t->duration;
@@ -1183,6 +1185,7 @@ static int setting(const char *env, const char *key, char *out, int size) {
 static int percent(const char *v, int def) { return v[0] && strspn(v, "0123456789") == strlen(v) ? (atoi(v) > 100 ? 100 : atoi(v)) : def; }
 
 int music_available(void) { init(); EnterCriticalSection(&L); int ok = ff_state > 0; LeaveCriticalSection(&L); return ok; }
+int music_ffmpeg_missing(void) { init(); EnterCriticalSection(&L); int m = ff_state < 0; LeaveCriticalSection(&L); return m; }
 int music_enabled(void) { return LD(M.enabled); }
 
 int music_set_enabled(int on) {
@@ -1270,6 +1273,32 @@ int music_folders(MusicFolder *out, int max) {
     return n;
 }
 
+int music_source_tracks(const char *src, MusicTrack *out, int max) {
+    init();
+    char want[1024];
+    snprintf(want, sizeof want, "%s", src ? src : "");
+    norm(want);
+    strip_sep(want);
+    EnterCriticalSection(&L);
+    int n = 0;
+    Playlist *pl = NULL;
+    for (int p = 0; *want && p < lib.nlist; p++) if (!PATHCMP(lib.list[p].path, want)) pl = &lib.list[p];
+    int total = pl ? pl->n : lib.n;
+    for (int k = 0; k < total; k++) {
+        const Item *it = &lib.item[pl ? pl->item[k] : k];
+        if (!pl && (it->folder < 0 || (*want && !under(it->path, want)))) continue;
+        if (n < max) {
+            snprintf(out[n].path, sizeof out[n].path, "%s", it->path);
+            snprintf(out[n].title, sizeof out[n].title, "%s", *it->title ? it->title : base_name(it->path));
+            snprintf(out[n].artist, sizeof out[n].artist, "%s", it->artist);
+            out[n].duration = it->duration > 0 ? it->duration : 0;
+        }
+        n++;
+    }
+    LeaveCriticalSection(&L);
+    return n;
+}
+
 void music_now(MusicNow *now) {
     memset(now, 0, sizeof *now);
     init();
@@ -1279,6 +1308,7 @@ void music_now(MusicNow *now) {
     for (int i = 0; i < nent; i++) if (ent[i].start <= rp) e = i;
     if (LD(M.enabled) && e >= 0) {
         now->state = LD(M.paused) ? 2 : 1;
+        now->serial = ent[e].seq;
         snprintf(now->title, sizeof now->title, "%s", ent[e].title);
         snprintf(now->artist, sizeof now->artist, "%s", ent[e].artist);
         now->duration = ent[e].duration > 0 ? ent[e].duration : 0;

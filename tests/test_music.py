@@ -486,6 +486,30 @@ class MusicTests(unittest.TestCase):
             o = [round(frequency(res.left, int(a * RATE), int(b * RATE)) / 100) * 100 for a, b in ((0.2, 0.9), (1.2, 1.9), (2.2, 2.9), (3.2, 3.9), (4.2, 4.9))]
             self.assertEqual(o, [300, 500, 700, 500, 300], o)
 
+    def test_track_list_and_serial(self):
+        g = self.game()
+        a = self.tones(g, os.path.join(g, 'music', 'A'), [('1.wav', 300), ('2.wav', 500)])
+        b = self.tones(g, os.path.join(g, 'music', 'B'), [('3.wav', 700)])
+        pl = os.path.join(g, 'music', 'mix.m3u')
+        with open(pl, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('%s\n%s\n' % (b['3.wav'], a['1.wav']))
+        titles = lambda res: [ln[6:].split('|')[0] for ln in res.lines('TRACK ')]
+        res = self.run_engine(g, '--tracks', 'all', seconds=0.2)
+        self.assertEqual(res.lines('TRACKLIST'), ['TRACKLIST 3'], res.out)
+        self.assertEqual(titles(res), ['1', '2', '3'])
+        res = self.run_engine(g, '--tracks', os.path.join(g, 'music', 'A'), seconds=0.2)
+        self.assertEqual(titles(res), ['1', '2'])
+        self.assertAlmostEqual(float(res.lines('TRACK ')[0].split('|')[2]), 1.0, delta=0.1)
+        self.assertTrue(res.lines('TRACK ')[1].endswith(a['2.wav']))
+        res = self.run_engine(g, '--tracks', pl, seconds=0.2)
+        self.assertEqual(titles(res), ['3', '1'])   # (the playlist's own order)
+        with self.subTest('serial changes when a new track is heard'):
+            res = self.run_engine(g, '--now', '0.5', '--now', '0.7', '--now', '1.5', seconds=2)
+            serials = [ln.split('|')[5] for ln in res.lines('NOW')]
+            self.assertNotEqual(serials[0], '0')
+            self.assertEqual(serials[0], serials[1])
+            self.assertNotEqual(serials[1], serials[2])
+
     # ---- playlists ----
     def tones(self, game, folder, names_freqs, secs=1.0):
         paths = {}
