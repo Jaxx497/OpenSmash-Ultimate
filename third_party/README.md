@@ -78,6 +78,13 @@ surfaces; not the C++ headers or the other systems' surfaces), `include/vk_video
 file's SHA-256; `tests/test_renderer_option.py` checks them. To update: take the same files from a
 newer tag and write `SHA256SUMS` again (`sha256sum` of each file, in that format).
 
+## ffmpeg/
+
+Not linked: headers only, for the custom-music player (`docs/CUSTOM-MUSIC-PLAN.md`, "Getting FFmpeg"),
+which loads FFmpeg's DLLs at run time. [Its README](ffmpeg/README.md) says which release, how the headers
+were taken, and where the libraries come from (`tools/ffmpeg_fetch.py`, built by `tools/ffmpeg_build.sh`).
+LGPL-2.1-or-later; the text is `ffmpeg/COPYING.LGPLv2.1`.
+
 ## fonts_open/
 
 Not a library: open fonts used in place of a firmware font that isn't there, taken unmodified

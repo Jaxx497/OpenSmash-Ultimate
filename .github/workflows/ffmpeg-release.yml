@@ -1,0 +1,39 @@
+# The audio-only FFmpeg the custom-music player loads at run time (docs/CUSTOM-MUSIC-PLAN.md, "Getting FFmpeg"):
+# avformat-61, avcodec-61, avutil-59 and swresample-5 DLLs for Windows x64, cross-compiled on Ubuntu with mingw-w64 by
+# tools/ffmpeg_build.sh (LGPL-2.1-or-later). Run by hand with a tag such as ffmpeg-audio-v1; the release holds the
+# zip, the FFmpeg source tarball it was built from (the LGPL asks for it) and SHA256SUMS. Then put the zip's SHA-256
+# into tools/ffmpeg_fetch.py (RELEASE_SHA256).
+name: FFmpeg release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create, e.g. ffmpeg-audio-v1'
+        required: true
+        default: 'ffmpeg-audio-v1'
+
+permissions:
+  contents: write
+
+jobs:
+  ffmpeg:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 make zip xz-utils curl
+      - name: Build
+        run: tools/ffmpeg_build.sh "$RUNNER_TEMP/dist"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cd "$RUNNER_TEMP/dist"
+          gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --title "FFmpeg (audio only) $TAG" \
+            --notes "FFmpeg 7.1.5, audio decoders only, LGPL-2.1-or-later, built from commit ${GITHUB_SHA} by tools/ffmpeg_build.sh (the exact configure line is in the zip). The source tarball is attached. tools/ffmpeg_fetch.py fetches the zip." \
+            *.zip *.tar.xz SHA256SUMS

@@ -3,7 +3,10 @@
 Findings are in [CUSTOM-MUSIC.md](CUSTOM-MUSIC.md). Owner's decisions (2026-11-15): the settings tab is
 "Audio"; music folders can be changed later and there can be several; formats mp3, m4a, flac, wav, ogg, opus.
 
-## Step 2: silence the game's music (done in code, not yet tried in the game)
+## Step 2: silence the game's music (done; checked in the game)
+
+The owner checked this in the game on 2026-11-15 and all checks passed: a fight with game music off, switching
+it on mid-match, the options slider, and a restart with it off silent from the title.
 
 What it does now: `runtime/hle_music.c` hooks the group volume function (installed from `main` in
 `host.c`, after the modules load, before the game runs) and passes 0 for group 4 while `game_music` is
@@ -62,3 +65,26 @@ The original plan:
   download, more code and six libraries to maintain.
 - Audio tab rows: Music on/off (turns game music off with it), Music volume, Shuffle, Next track,
   Now playing.
+
+## Getting FFmpeg
+
+Decision: the player decodes with FFmpeg 7.1.x (avformat-61, avcodec-61, avutil-59, swresample-5), loaded at
+run time (`LoadLibrary` / `dlopen`), not linked: the game builds and runs without it, and music is simply
+unavailable when the DLLs are missing. LGPL-2.1-or-later build, never `--enable-gpl` or `--enable-nonfree`.
+
+- Headers: `third_party/ffmpeg/include` (FFmpeg 7.1.5, `third_party/ffmpeg/README.md`).
+- The project's build: `tools/ffmpeg_build.sh` (mingw-w64 on Ubuntu, audio demuxers and decoders only:
+  mp3, m4a with AAC or ALAC, flac, wav PCM, Ogg Vorbis and Opus, raw AAC; `--disable-x86asm`, so no nasm).
+  `.github/workflows/ffmpeg-release.yml` runs it and publishes the zip, the FFmpeg source tarball and
+  `SHA256SUMS` as a release.
+- The build fetches it with `python tools/ffmpeg_fetch.py` into `deps/ffmpeg/bin` (pinned tag, asset and
+  SHA-256 at the top of that script; skipped when the DLLs are there with the recorded hashes).
+- Development fallback, used by default while the project's release is still the placeholder, or with
+  `--dev`: BtbN's FFmpeg-Builds `autobuild-2026-07-31-14-10`, `ffmpeg-n7.1.5-12-g1fdbca85aa-win64-lgpl-shared-7.1.zip`
+  (pinned by SHA-256). It has every codec (avcodec is 66 MB); only the four DLLs and the license are kept.
+
+Release steps for a maintainer: run the "FFmpeg release" workflow (Actions, Run workflow) with the tag
+`ffmpeg-audio-v1`; when it finishes, copy the SHA-256 of `opensmash-ffmpeg-audio-7.1.5-win64.zip` from the
+release's `SHA256SUMS` into `RELEASE_SHA256` in `tools/ffmpeg_fetch.py` (replacing the placeholder), and check
+that `python tools/ffmpeg_fetch.py` (no `--dev`) fetches it. The script has never run against the real
+build: the first run may show a decoder or demuxer missing from the configure line.
