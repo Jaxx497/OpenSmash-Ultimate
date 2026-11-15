@@ -124,6 +124,7 @@ enum
 enum
 {
     P_DISPLAY,
+    P_AUDIO,
     P_PADS,
     P_ONLINE,
     P_GAME,
@@ -135,7 +136,7 @@ enum
     PAGES = P_REMAP
 }; /* (the pad's buttons, the keyboard's keys, the pad's sticks: no key of their own) */
 #define SUB_PAGE(p) ((p) == P_REMAP || (p) == P_KEYS || (p) == P_STICKS) /* (a page of the Controllers page's) */
-static const char *const PAGE_NAMES[PAGES] = {"Display", "Controllers", "Online", "Game", "Lobby", "Mods"};
+static const char *const PAGE_NAMES[PAGES] = {"Display", "Audio", "Controllers", "Online", "Game", "Lobby", "Mods"};
 enum { K_INFO, K_CHOICE, K_ACTION, K_TEXT };
 enum { W_NONE, W_NOW, W_RESTART };
 enum {
@@ -145,7 +146,7 @@ enum {
     R_RUMBLE, R_KEYBOARD, R_BACKGROUND, R_PADS_FILE,
     R_NET_STATUS, R_NET_MODE, R_NET_CODE, R_NET_SERVER, R_NET_NAME, R_NET_DIRECT, R_NET_PROTOCOL,
     R_LOBBY, R_MATCH_FIND, R_MATCH_CANCEL, R_ROOMS,
-    R_LANGUAGE, R_VOLUME, R_RESTART, R_QUIT, R_REMAP_BACK, R_MODS_STATE, R_MOD_CODE, R_MODS_OFF, R_LAN_ROOMS,
+    R_LANGUAGE, R_VOLUME, R_GAME_MUSIC, R_RESTART, R_QUIT, R_REMAP_BACK, R_MODS_STATE, R_MOD_CODE, R_MODS_OFF, R_LAN_ROOMS,
     R_KEYS, R_KEYS_BACK, R_KEYS_RESET, R_RENDERER, R_ROOMS_PREV, R_ROOMS_NEXT, R_ROOMS_GAME_PAGE, R_RUNAHEAD, R_NET_ROLLBACK, R_NET_DELAY,
     R_ROOM_FIRST = 60,    /* + the room's place on the page of rooms shown (ROOM_PAGE at most) */
     R_REMAP_FIRST = 100,  /* + console button */
@@ -947,6 +948,15 @@ static void build(void)
         note_env(r, "SSBU_RENDERER");
 #endif
         break;
+    case P_AUDIO:
+        r = add(R_VOLUME, K_CHOICE, W_NOW, "Volume", "The game's whole sound, over the game's own sound settings; 0% is silent.");
+        snprintf(r->value, sizeof r->value, "%d%%", audio_master_volume());
+        note_env(r, "SSBU_VOLUME");
+        r = add(R_GAME_MUSIC, K_CHOICE, W_NOW, "Game music",
+                "The game's own music. Off silences it and keeps sound effects and voices; for playing your own music.");
+        snprintf(r->value, sizeof r->value, "%s", on_off(audio_game_music()));
+        note_env(r, "SSBU_GAME_MUSIC");
+        break;
     case P_PADS:
         if (!npads_connected)
         {
@@ -1194,9 +1204,6 @@ static void build(void)
             snprintf(lang, sizeof lang, "auto");
         snprintf(r->value, sizeof r->value, "%s", _stricmp(lang, "auto") ? language_pick(lang) : "auto");
         note_env(r, "SSBU_LANGUAGE");
-        r = add(R_VOLUME, K_CHOICE, W_NOW, "Volume", "The game's whole sound, over the game's own sound settings; 0% is silent.");
-        snprintf(r->value, sizeof r->value, "%d%%", audio_master_volume());
-        note_env(r, "SSBU_VOLUME");
     }
         add(R_RESTART, K_ACTION, W_NONE, "Restart the game", "Starts the game again (for the settings marked 'next start'). A match in progress is lost.");
         add(R_QUIT, K_ACTION, W_NONE, "Quit the game", "Closes the game. A match in progress is lost.");
@@ -1334,6 +1341,10 @@ static void change(const Row *row, int dir)
         set_display("volume", v);
         break;
     }
+    case R_GAME_MUSIC:
+        audio_set_game_music(!audio_game_music());
+        set_display("game_music", audio_game_music() ? "1" : "0");
+        break;
     case R_LANGUAGE:
     { /* auto, then the game's codes */
         char lang[32] = "";

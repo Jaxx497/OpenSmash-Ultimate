@@ -3,7 +3,29 @@
 Findings are in [CUSTOM-MUSIC.md](CUSTOM-MUSIC.md). Owner's decisions (2026-11-15): the settings tab is
 "Audio"; music folders can be changed later and there can be several; formats mp3, m4a, flac, wav, ogg, opus.
 
-## Step 2: silence the game's music (hand to a Sonnet subagent)
+## Step 2: silence the game's music (done in code, not yet tried in the game)
+
+What it does now: `runtime/hle_music.c` hooks the group volume function (installed from `main` in
+`host.c`, after the modules load, before the game runs) and passes 0 for group 4 while `game_music` is
+off; `audio_game_music()` / `audio_set_game_music()` (`runtime/audio.h`) hold the setting
+(`SSBU_GAME_MUSIC`, else `display.ini` `game_music`, 1 default). A change from the menu is applied by a
+`FRAME_HOOK_END` handler on the game thread, once the game has called the function for group 4 once.
+The settings menu has an "Audio" tab (after Display) with the moved Volume row and "Game music".
+Adding it changes no game-code fingerprint (`tools/recomp.py` hashes `HLE(...)` names, `HLE_WRAP`
+targets and `tools/hooks.txt`; this uses a run-time `rt_hook_function` and none of those), and the
+build globs `runtime/hle*.c`, so no list needed the new file.
+
+Linux and macOS: `rt_hook_function` patches direct calls on Windows only (`runtime/hle_detour.c`), so
+there a direct call of the function (the boot call, if it is one) bypasses the hook and the music stays
+on at boot; the menu's change still works. No workaround built.
+
+Not yet checked in the game:
+- a fight with "Game music" off: stage music silent, effects and voices play;
+- switching it back on in a match brings the music back (at the options menu's volume);
+- the options menu's music slider still works when on, and is silent when off;
+- starting with `game_music=0` in `display.ini` is silent from the title screen (the boot call is hooked).
+
+The original plan:
 
 1. New `runtime/hle_music.c`. At boot, hook the game's mixer-group volume function
    `0x71037375f0 (w0 = group, s0 = volume)` with `rt_hook_function(addr, rt_native(fn, "music group volume"))`

@@ -105,6 +105,8 @@ int display_renderer(void) { return RENDERER_DEFAULT; }   /* (the setting this s
 int gfx_renderer(void) { return RENDERER_D3D11; }
 int audio_master_volume(void) { return 100; }                 /* (ipc_audio.c: the master volume) */
 void audio_set_master_volume(int percent) { (void)percent; }
+int audio_game_music(void) { return 1; }                      /* (hle_music.c: the game's music switch) */
+void audio_set_game_music(int on) { (void)on; }
 /* (hle_mod_switch.c: no mods here) */
 int mods_switch_list(ModSwitch *out, int max, int *code) { (void)out; (void)max; *code = -1; return 0; }
 int mods_switch_set(const char *name, int on) { (void)name; (void)on; return 0; }

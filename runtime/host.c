@@ -74,6 +74,7 @@ extern u64 gpu_stat_batches, gpu_stat_lists, gpu_stat_draws, gpu_stat_dispatches
     gfx_skip_target, gfx_stat_unmap_dropped;
 u64 present_frames(void);
 void movie_test_start(void);   /* (hle_movie_skip.c) SSBU_SKIP_MOVIES, SSBU_SEQ's mark movie */
+void music_start(void);        /* (hle_music.c) the game's music switch */
 void test_fight_start(void);   /* (hle_fight_test.c) SSBU_FIGHT_HASH, SSBU_DETERMINISTIC, SSBU_DEBUG_MATCH... */
 void gfx_report_compiles(void (*line)(const char *text));
 void gfx_status_lines(void);
@@ -1696,6 +1697,7 @@ int main(int argc, char **argv) {
     kernel_init();
     load(dir);
     movie_test_start();
+    music_start();
     test_fight_start();
 #ifndef _WIN32
     rt_window_init();   /* (SDL wants its window and events on the main thread, which then runs them) */
