@@ -77,6 +77,13 @@ class ModLibrary(unittest.TestCase):
         with self.assertRaises(mods.Error):
             mods.import_list(self.tree, path, log=lambda s: None)
 
+    def test_an_exefs_patch_says_what_it_is(self):
+        mod = os.path.join(self.tmp.name, "120fps", "exefs")
+        os.makedirs(mod)
+        open(os.path.join(mod, "13.0.4.pchtxt"), "w").close()
+        with self.assertRaisesRegex(mods.Error, "exefs"):
+            mods.install(self.tree, os.path.dirname(mod))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -381,6 +381,11 @@ def install(tree, archive, name=None, meta=None):
         roots = find_roots(os.path.join(tmp, "x"))
         if not roots and plugins(os.path.join(tmp, "x")):   # (only code: a moveset or gameplay plugin, recompiled into the game)
             roots = [os.path.join(tmp, "x")]
+        if not roots and any(n.lower().endswith((".pchtxt", ".ips")) for _d, _s, fs in os.walk(os.path.join(tmp, "x")) for n in fs):
+            # (an exefs patch - 120FPS Definitive Edition: bytes of the Switch's `main`, for one build of
+            # it by its nsobid. Here `main` is 13.0.5's, recompiled: the patch's offsets aren't in it)
+            raise Error(f"{os.path.basename(archive)} is a patch to the Switch's program (exefs .pchtxt/.ips), "
+                        "made for one game version's code: WindowSmash recompiles that code, so it cannot apply")
         if not roots:
             raise Error(f"{os.path.basename(archive)} has no files laid out as the game's (fighter/, ui/, sound/, stream;/ ...) "
                         "and no Skyline plugin (.nro)")
